@@ -998,11 +998,11 @@ static void  NC_DoNCPaint( HWND  hwnd, HRGN  clip )
     if (clip > (HRGN)1)
     {
         CombineRgn( hrgn, clip, hrgn, RGN_DIFF );
-        hdc = GetDCEx( hwnd, hrgn, DCX_USESTYLE | DCX_WINDOW | DCX_INTERSECTRGN );
+        hdc = NtUserGetDCEx( hwnd, hrgn, DCX_USESTYLE | DCX_WINDOW | DCX_INTERSECTRGN );
     }
     else
     {
-        hdc = GetDCEx( hwnd, hrgn, DCX_USESTYLE | DCX_WINDOW | DCX_EXCLUDERGN );
+        hdc = NtUserGetDCEx( hwnd, hrgn, DCX_USESTYLE | DCX_WINDOW | DCX_EXCLUDERGN );
     }
 
     if (!hdc)
@@ -1070,7 +1070,7 @@ static void  NC_DoNCPaint( HWND  hwnd, HRGN  clip )
         FillRect( hdc, &r, GetSysColorBrush( COLOR_BTNFACE ) );
     }
 
-    ReleaseDC( hwnd, hdc );
+    NtUserReleaseDC( hwnd, hdc );
 }
 
 
@@ -1083,7 +1083,7 @@ static void  NC_DoNCPaint( HWND  hwnd, HRGN  clip )
  */
 LRESULT NC_HandleNCPaint( HWND hwnd , HRGN clip)
 {
-    HWND parent = GetAncestor( hwnd, GA_PARENT );
+    HWND parent = NtUserGetAncestor( hwnd, GA_PARENT );
     DWORD dwStyle = GetWindowLongW( hwnd, GWL_STYLE );
 
     if( dwStyle & WS_VISIBLE )
@@ -1119,7 +1119,7 @@ LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam, LPARAM lParam )
     {
         NC_DoNCPaint( hwnd, (HRGN)1 );
 
-        if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
+        if (NtUserGetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
             PostMessageW( GetDesktopWindow(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
     }
 
@@ -1240,7 +1240,7 @@ static void NC_TrackMinMaxBox( HWND hwnd, WORD wParam )
         paintButton = NC_DrawMaxButton;
     }
 
-    SetCapture( hwnd );
+    NtUserSetCapture( hwnd );
 
     (*paintButton)( hwnd, hdc, TRUE, FALSE);
 
@@ -1266,7 +1266,7 @@ static void NC_TrackMinMaxBox( HWND hwnd, WORD wParam )
         (*paintButton)(hwnd, hdc, FALSE, FALSE);
 
     ReleaseCapture();
-    ReleaseDC( hwnd, hdc );
+    NtUserReleaseDC( hwnd, hdc );
 
     /* If the minimize or maximize items of the sysmenu are not there */
     /* or if the style is not present, do nothing */
@@ -1305,7 +1305,7 @@ static void NC_TrackCloseButton (HWND hwnd, WPARAM wParam, LPARAM lParam)
 
     hdc = GetWindowDC( hwnd );
 
-    SetCapture( hwnd );
+    NtUserSetCapture( hwnd );
 
     NC_DrawCloseButton (hwnd, hdc, TRUE, FALSE);
 
@@ -1331,7 +1331,7 @@ static void NC_TrackCloseButton (HWND hwnd, WPARAM wParam, LPARAM lParam)
         NC_DrawCloseButton (hwnd, hdc, FALSE, FALSE);
 
     ReleaseCapture();
-    ReleaseDC( hwnd, hdc );
+    NtUserReleaseDC( hwnd, hdc );
     if (!pressed) return;
 
     SendMessageW( hwnd, WM_SYSCOMMAND, SC_CLOSE, lParam );
@@ -1379,7 +1379,7 @@ LRESULT NC_HandleNCLButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam )
             {
                 if ((GetWindowLongW( top, GWL_STYLE ) & (WS_POPUP|WS_CHILD)) != WS_CHILD)
                     break;
-                parent = GetAncestor( top, GA_PARENT );
+                parent = NtUserGetAncestor( top, GA_PARENT );
                 if (!parent || parent == GetDesktopWindow()) break;
                 top = parent;
             }
@@ -1394,7 +1394,7 @@ LRESULT NC_HandleNCLButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam )
         {
             HDC hDC = GetWindowDC( hwnd );
             NC_DrawSysButton( hwnd, hDC, TRUE );
-            ReleaseDC( hwnd, hDC );
+            NtUserReleaseDC( hwnd, hDC );
             SendMessageW( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU + HTSYSMENU, lParam );
         }
         break;
@@ -1460,7 +1460,7 @@ LRESULT NC_HandleNCRButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam )
     {
     case HTCAPTION:
     case HTSYSMENU:
-        SetCapture( hwnd );
+        NtUserSetCapture( hwnd );
         for (;;)
         {
             if (!GetMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST )) break;
@@ -1557,19 +1557,19 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
 
     case SC_MINIMIZE:
         ShowOwnedPopups(hwnd,FALSE);
-        ShowWindow( hwnd, SW_MINIMIZE );
+        NtUserShowWindow( hwnd, SW_MINIMIZE );
         break;
 
     case SC_MAXIMIZE:
         if (IsIconic(hwnd))
             ShowOwnedPopups(hwnd,TRUE);
-        ShowWindow( hwnd, SW_MAXIMIZE );
+        NtUserShowWindow( hwnd, SW_MAXIMIZE );
         break;
 
     case SC_RESTORE:
         if (IsIconic(hwnd))
             ShowOwnedPopups(hwnd,TRUE);
-        ShowWindow( hwnd, SW_RESTORE );
+        NtUserShowWindow( hwnd, SW_RESTORE );
         break;
 
     case SC_CLOSE:

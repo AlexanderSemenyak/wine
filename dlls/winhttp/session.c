@@ -1160,6 +1160,7 @@ HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, const WCHAR *verb, cons
     request->hdr.notify_mask = connect->hdr.notify_mask;
     request->hdr.context = connect->hdr.context;
     request->hdr.redirect_policy = connect->hdr.redirect_policy;
+    init_queue( &request->queue );
 
     addref_object( &connect->hdr );
     request->connect = connect;
@@ -1224,6 +1225,15 @@ static BOOL query_option( struct object_header *hdr, DWORD option, void *buffer,
 
     switch (option)
     {
+    case WINHTTP_OPTION_WORKER_THREAD_COUNT:
+    {
+        FIXME( "WINHTTP_OPTION_WORKER_THREAD_COUNT semi-stub.\n" );
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
+        *(DWORD *)buffer = 0;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+    }
     case WINHTTP_OPTION_CONTEXT_VALUE:
     {
         if (!validate_buffer( buffer, buflen, sizeof(DWORD_PTR) )) return FALSE;

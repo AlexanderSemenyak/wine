@@ -53,7 +53,6 @@ static DWORD shader_creator[] = {
 0x39207265, 0x2e39322e, 0x2e323539, 0x31313133, 0xababab00,
 };
 
-#if D3D_COMPILER_VERSION
 /*
  * fxc.exe /E VS /Tvs_4_0 /Fx
  */
@@ -81,6 +80,7 @@ static DWORD test_reflection_blob[] = {
 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 };
 
+#if D3D_COMPILER_VERSION
 static void test_reflection_references(void)
 {
     ID3D11ShaderReflection *ref11, *ref11_test;
@@ -211,6 +211,31 @@ static void test_reflection_interfaces(void)
     ok(!count, "Got unexpected ref count %lu.\n", count);
     count = ref11->lpVtbl->Release(ref11);
     ok(!count, "Got unexpected ref count %lu.\n", count);
+}
+#else
+static void test_d3d10_interfaces(void)
+{
+    ID3D10ShaderReflection *ref10;
+    IUnknown *unk;
+    HRESULT hr;
+
+    hr = D3D10ReflectShader(test_reflection_blob, sizeof(test_reflection_blob), &ref10);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = ref10->lpVtbl->QueryInterface(ref10, &IID_ID3D10ShaderReflection, (void **)&unk);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    IUnknown_Release(unk);
+
+    hr = ref10->lpVtbl->QueryInterface(ref10, &IID_ID3D10ShaderReflection1, (void **)&unk);
+    ok(hr == E_NOINTERFACE, "Got hr %#lx.\n", hr);
+
+    hr = ref10->lpVtbl->QueryInterface(ref10, &IID_ID3D11ShaderReflection, (void **)&unk);
+    ok(hr == E_NOINTERFACE, "Got hr %#lx.\n", hr);
+
+    hr = ref10->lpVtbl->QueryInterface(ref10, &IID_ID3D12ShaderReflection, (void **)&unk);
+    ok(hr == E_NOINTERFACE, "Got hr %#lx.\n", hr);
+
+    ref10->lpVtbl->Release(ref10);
 }
 #endif
 
@@ -410,9 +435,9 @@ static void test_reflection_desc_vs(void)
     hr = ref11->lpVtbl->GetDesc(ref11, &sdesc11);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    ok(sdesc11.Version == 65601, "GetDesc failed, got %u, expected %u\n", sdesc11.Version, 65601);
-    ok(strcmp(sdesc11.Creator, (char*) shader_creator) == 0, "GetDesc failed, got \"%s\", expected \"%s\"\n", sdesc11.Creator, (char*)shader_creator);
-    ok(sdesc11.Flags == 256, "GetDesc failed, got %u, expected %u\n", sdesc11.Flags, 256);
+    ok(sdesc11.Version == 0x10041, "Unexpected Version %#x.\n", sdesc11.Version);
+    ok(!strcmp(sdesc11.Creator, (char *)shader_creator), "Unexpected Creator \"%s\".\n", sdesc11.Creator);
+    ok(sdesc11.Flags == 0x100, "Unexpected Flags %#x.\n", sdesc11.Flags);
     ok(sdesc11.ConstantBuffers == 0, "GetDesc failed, got %u, expected %u\n", sdesc11.ConstantBuffers, 0);
     ok(sdesc11.BoundResources == 0, "GetDesc failed, got %u, expected %u\n", sdesc11.BoundResources, 0);
     ok(sdesc11.InputParameters == 15, "GetDesc failed, got %u, expected %u\n", sdesc11.InputParameters, 15);
@@ -752,6 +777,7 @@ static void test_reflection_desc_ps(void)
     D3D_NAME expected;
     unsigned int i;
 #if D3D_COMPILER_VERSION
+    UINT size_x, size_y, size_z, size_total;
     UINT ret;
 #endif
 
@@ -761,9 +787,9 @@ static void test_reflection_desc_ps(void)
     hr = ref11->lpVtbl->GetDesc(ref11, &sdesc11);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    ok(sdesc11.Version == 65, "GetDesc failed, got %u, expected %u\n", sdesc11.Version, 65);
-    ok(strcmp(sdesc11.Creator, (char*) shader_creator) == 0, "GetDesc failed, got \"%s\", expected \"%s\"\n", sdesc11.Creator, (char*)shader_creator);
-    ok(sdesc11.Flags == 256, "GetDesc failed, got %u, expected %u\n", sdesc11.Flags, 256);
+    ok(sdesc11.Version == 0x41, "Unexpected Version %#x.\n", sdesc11.Version);
+    ok(!strcmp(sdesc11.Creator, (char *)shader_creator), "Unexpected Creator \"%s\".\n", sdesc11.Creator);
+    ok(sdesc11.Flags == 0x100, "Unexpected Flags %#x.\n", sdesc11.Flags);
     ok(sdesc11.ConstantBuffers == 0, "GetDesc failed, got %u, expected %u\n", sdesc11.ConstantBuffers, 0);
     ok(sdesc11.BoundResources == 4, "GetDesc failed, got %u, expected %u\n", sdesc11.BoundResources, 4);
     ok(sdesc11.InputParameters == 8, "GetDesc failed, got %u, expected %u\n", sdesc11.InputParameters, 8);
@@ -894,6 +920,17 @@ static void test_reflection_desc_ps(void)
         else if (sizeof(void *) == 4)
             ok(!desc.Stream, "(%u): got unexpected Stream %u.\n", i, desc.Stream);
     }
+
+#if D3D_COMPILER_VERSION
+    size_x = 0xdeadbeef;
+    size_y = 0xdeadbeef;
+    size_z = 0xdeadbeef;
+    size_total = ref11->lpVtbl->GetThreadGroupSize(ref11, &size_x, &size_y, &size_z);
+    ok(!size_x, "Unexpected size %u.\n", size_x);
+    ok(!size_y, "Unexpected size %u.\n", size_y);
+    ok(!size_z, "Unexpected size %u.\n", size_z);
+    ok(!size_total, "Unexpected size %u.\n", size_total);
+#endif
 
     count = ref11->lpVtbl->Release(ref11);
     ok(!count, "Got unexpected count %lu.\n", count);
@@ -1160,6 +1197,81 @@ static const D3D12_SHADER_INPUT_BIND_DESC test_reflection_bound_resources_result
     {"c1", D3D_SIT_CBUFFER, 0, 1, 0, 0, D3D_SRV_DIMENSION_UNKNOWN, 0},
     {"c2", D3D_SIT_CBUFFER, 1, 1, 0, 0, D3D_SRV_DIMENSION_UNKNOWN, 0, 0, 1},
 };
+
+static void test_reflection_cs(void)
+{
+    /*
+     * fxc.exe /T cs_4_0 /Fo
+     */
+#if 0
+    [numthreads(16, 8, 4)]
+    void main( uint3 DTid : SV_DispatchThreadID )
+    {
+    }
+#endif
+    static const DWORD test_blob_cs_4_0[] =
+    {
+        0x43425844, 0x698a31ca, 0x8c6eee35, 0x2377107a, 0xe1e69066, 0x00000001, 0x00000150, 0x00000005,
+        0x00000034, 0x0000008c, 0x0000009c, 0x000000ac, 0x000000d4, 0x46454452, 0x00000050, 0x00000000,
+        0x00000000, 0x00000000, 0x0000001c, 0x43530400, 0x00000100, 0x0000001c, 0x7263694d, 0x666f736f,
+        0x52282074, 0x4c482029, 0x53204c53, 0x65646168, 0x6f432072, 0x6c69706d, 0x39207265, 0x2e39322e,
+        0x2e323539, 0x31313133, 0xababab00, 0x4e475349, 0x00000008, 0x00000000, 0x00000008, 0x4e47534f,
+        0x00000008, 0x00000000, 0x00000008, 0x58454853, 0x00000020, 0x00050040, 0x00000008, 0x0100086a,
+        0x0400009b, 0x00000010, 0x00000008, 0x00000004, 0x0100003e, 0x54415453, 0x00000074, 0x00000001,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    };
+
+    /*
+     * fxc.exe /T cs_5_1 /Fo
+     */
+#if 0
+    [numthreads(16, 8, 4)]
+    void main( uint3 DTid : SV_DispatchThreadID )
+    {
+    }
+#endif
+    static const DWORD test_blob[] =
+    {
+        0x43425844, 0x77a220d9, 0xfebd5b9c, 0x14a86e30, 0x57537394, 0x00000001, 0x00000184, 0x00000005,
+        0x00000034, 0x000000a0, 0x000000b0, 0x000000c0, 0x000000e8, 0x46454452, 0x00000064, 0x00000000,
+        0x00000000, 0x00000000, 0x0000003c, 0x43530501, 0x00000500, 0x0000003c, 0x25441313, 0x0000003c,
+        0x00000018, 0x00000028, 0x00000028, 0x00000024, 0x0000000c, 0x00000000, 0x7263694d, 0x666f736f,
+        0x52282074, 0x4c482029, 0x53204c53, 0x65646168, 0x6f432072, 0x6c69706d, 0x31207265, 0x00312e30,
+        0x4e475349, 0x00000008, 0x00000000, 0x00000008, 0x4e47534f, 0x00000008, 0x00000000, 0x00000008,
+        0x58454853, 0x00000020, 0x00050051, 0x00000008, 0x0100086a, 0x0400009b, 0x00000010, 0x00000008,
+        0x00000004, 0x0100003e, 0x54415453, 0x00000094, 0x00000001, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000,
+    };
+    UINT size_x, size_y, size_z, size_total;
+    ID3D11ShaderReflection *ref11;
+    HRESULT hr, expected;
+
+    expected = D3D_COMPILER_VERSION ? S_OK : E_INVALIDARG;
+    hr = call_reflect(test_blob_cs_4_0, test_blob_cs_4_0[6], &IID_ID3D11ShaderReflection, (void **)&ref11);
+    ok(hr == expected, "Unexpected hr %#lx.\n", hr);
+
+    if (SUCCEEDED(hr))
+        ref11->lpVtbl->Release(ref11);
+
+    hr = call_reflect(test_blob, test_blob[6], &IID_ID3D11ShaderReflection, (void **)&ref11);
+    ok(hr == expected, "Unexpected hr %#lx.\n", hr);
+    if (FAILED(hr))
+        return;
+    size_total = ref11->lpVtbl->GetThreadGroupSize(ref11, &size_x, &size_y, &size_z);
+    ok(size_x == 16, "Unexpected size %u.\n", size_x);
+    ok(size_y == 8, "Unexpected size %u.\n", size_y);
+    ok(size_z == 4, "Unexpected size %u.\n", size_z);
+    ok(size_total == size_x * size_y * size_z, "Unexpected size %u.\n", size_total);
+
+    ref11->lpVtbl->Release(ref11);
+}
 
 static void test_reflection_bound_resources(const DWORD *blob, const D3D12_SHADER_INPUT_BIND_DESC *result,
         unsigned int result_count, unsigned int target_version)
@@ -1627,10 +1739,10 @@ static void test_reflection_constant_buffer(void)
     hr = ref11->lpVtbl->GetDesc(ref11, &sdesc);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    expected = D3D_COMPILER_VERSION ? 80 : 64;
-    ok(sdesc.Version == expected, "Got unexpected version %u.\n", sdesc.Version);
-    ok(strcmp(sdesc.Creator, (char*) shader_creator) == 0, "GetDesc failed, got \"%s\", expected \"%s\"\n", sdesc.Creator, (char*)shader_creator);
-    ok(sdesc.Flags == 256, "GetDesc failed, got %u, expected %u\n", sdesc.Flags, 256);
+    expected = D3D_COMPILER_VERSION ? 0x50 : 0x40;
+    ok(sdesc.Version == expected, "Unexpected Version %#x.\n", sdesc.Version);
+    ok(!strcmp(sdesc.Creator, (char *)shader_creator), "Unexpected Creator \"%s\".\n", sdesc.Creator);
+    ok(sdesc.Flags == 0x100, "Unexpected Flags %#x.\n", sdesc.Flags);
     ok(sdesc.ConstantBuffers == 2, "GetDesc failed, got %u, expected %u\n", sdesc.ConstantBuffers, 2);
     expected = D3D_COMPILER_VERSION ? 1 : 2;
     ok(sdesc.BoundResources == expected, "Got unexpected BoundResources %u.\n", sdesc.BoundResources);
@@ -2125,7 +2237,10 @@ START_TEST(reflection)
 #if D3D_COMPILER_VERSION
     test_reflection_references();
     test_reflection_interfaces();
+#else
+    test_d3d10_interfaces();
 #endif
+    test_reflection_cs();
     test_reflection_desc_vs();
     test_reflection_desc_ps();
     test_reflection_desc_ps_output();

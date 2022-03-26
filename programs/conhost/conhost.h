@@ -69,6 +69,7 @@ struct edit_line
     unsigned int           end_offset;          /* offset of the last written char */
     unsigned int           home_x;              /* home position */
     unsigned int           home_y;
+    unsigned int           ctrl_mask;           /* mask for ctrl characters for completion */
 };
 
 struct console
@@ -77,6 +78,7 @@ struct console
     unsigned int           mode;                /* input mode */
     struct screen_buffer  *active;              /* active screen buffer */
     int                    is_unix;             /* UNIX terminal mode */
+    int                    use_relative_cursor; /* use relative cursor positionning */
     INPUT_RECORD          *records;             /* input records */
     unsigned int           record_count;        /* number of input records */
     unsigned int           record_size;         /* size of input records buffer */
@@ -87,6 +89,7 @@ struct console
     unsigned int           read_ioctl;          /* current read ioctl */
     size_t                 pending_read;        /* size of pending read buffer */
     struct edit_line       edit_line;           /* edit line context */
+    unsigned int           key_state;
     struct console_window *window;
     WCHAR                 *title;               /* console title */
     struct history_line  **history;             /* lines history */

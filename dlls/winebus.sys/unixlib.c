@@ -87,7 +87,8 @@ static void mouse_destroy(struct unix_device *iface)
 
 static NTSTATUS mouse_start(struct unix_device *iface)
 {
-    if (!hid_device_begin_report_descriptor(iface, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
+    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_MOUSE};
+    if (!hid_device_begin_report_descriptor(iface, &device_usage))
         return STATUS_NO_MEMORY;
     if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_BUTTON, 1, 3))
         return STATUS_NO_MEMORY;
@@ -102,7 +103,8 @@ static void mouse_stop(struct unix_device *iface)
 }
 
 static NTSTATUS mouse_haptics_start(struct unix_device *iface, UINT duration,
-                                    USHORT rumble_intensity, USHORT buzz_intensity)
+                                    USHORT rumble_intensity, USHORT buzz_intensity,
+                                    USHORT left_intensity, USHORT right_intensity)
 {
     return STATUS_NOT_SUPPORTED;
 }
@@ -176,7 +178,8 @@ static void keyboard_destroy(struct unix_device *iface)
 
 static NTSTATUS keyboard_start(struct unix_device *iface)
 {
-    if (!hid_device_begin_report_descriptor(iface, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
+    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_KEYBOARD};
+    if (!hid_device_begin_report_descriptor(iface, &device_usage))
         return STATUS_NO_MEMORY;
     if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_KEYBOARD, 0, 101))
         return STATUS_NO_MEMORY;
@@ -191,7 +194,8 @@ static void keyboard_stop(struct unix_device *iface)
 }
 
 static NTSTATUS keyboard_haptics_start(struct unix_device *iface, UINT duration,
-                                       USHORT rumble_intensity, USHORT buzz_intensity)
+                                       USHORT rumble_intensity, USHORT buzz_intensity,
+                                       USHORT left_intensity, USHORT right_intensity)
 {
     return STATUS_NOT_SUPPORTED;
 }

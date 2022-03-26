@@ -25,15 +25,40 @@
 #include "ntuser.h"
 #include "wine/list.h"
 
+struct dce;
+struct tagWND;
+
 struct user_callbacks
 {
-    HWND (WINAPI *pGetDesktopWindow)(void);
-    BOOL (WINAPI *pGetWindowRect)( HWND hwnd, LPRECT rect );
-    BOOL (WINAPI *pIsChild)( HWND, HWND );
-    BOOL (WINAPI *pRedrawWindow)( HWND, const RECT*, HRGN, UINT );
+    BOOL (WINAPI *pAdjustWindowRectEx)( RECT *, DWORD, BOOL, DWORD );
+    HANDLE (WINAPI *pCopyImage)( HANDLE, UINT, INT, INT, UINT );
+    BOOL (WINAPI *pDestroyCaret)(void);
+    BOOL (WINAPI *pEndMenu)(void);
+    BOOL (WINAPI *pHideCaret)( HWND hwnd );
+    BOOL (WINAPI *pPostMessageW)( HWND, UINT, WPARAM, LPARAM );
+    UINT (WINAPI *pSendInput)( UINT count, INPUT *inputs, int size );
     LRESULT (WINAPI *pSendMessageTimeoutW)( HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR );
-    HWND (WINAPI *pWindowFromDC)( HDC );
+    LRESULT (WINAPI *pSendMessageA)( HWND, UINT, WPARAM, LPARAM );
+    LRESULT (WINAPI *pSendMessageW)( HWND, UINT, WPARAM, LPARAM );
+    BOOL (WINAPI *pSendNotifyMessageW)( HWND, UINT, WPARAM, LPARAM );
+    BOOL (WINAPI *pSetSystemMenu)( HWND hwnd, HMENU menu );
+    BOOL (WINAPI *pShowCaret)( HWND hwnd );
+    DWORD (WINAPI *pWaitForInputIdle)( HANDLE, DWORD );
+    void (CDECL *free_menu_items)( void *ptr );
+    void (CDECL *free_win_ptr)( struct tagWND *win );
+    HWND (CDECL *is_menu_active)(void);
+    void (CDECL *notify_ime)( HWND hwnd, UINT param );
+    void (CDECL *register_builtin_classes)(void);
+    LRESULT (WINAPI *send_ll_message)( DWORD, DWORD, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR );
+    BOOL (CDECL *set_menu)( HWND hwnd, HMENU menu );
+    void (WINAPI *set_standard_scroll_painted)( HWND hwnd, INT bar, BOOL visible );
+    void (CDECL *set_user_driver)( void *, UINT );
+    BOOL (WINAPI *register_imm)( HWND hwnd );
+    void (WINAPI *unregister_imm)( HWND hwnd );
 };
+
+#define WM_SYSTIMER         0x0118
+#define WM_POPUPSYSTEMMENU  0x0313
 
 struct user_object
 {
@@ -45,7 +70,6 @@ struct user_object
 
 HANDLE alloc_user_handle( struct user_object *ptr, unsigned int type ) DECLSPEC_HIDDEN;
 void *get_user_handle_ptr( HANDLE handle, unsigned int type ) DECLSPEC_HIDDEN;
-void set_user_handle_ptr( HANDLE handle, struct user_object *ptr ) DECLSPEC_HIDDEN;
 void release_user_handle_ptr( void *ptr ) DECLSPEC_HIDDEN;
 void *free_user_handle( HANDLE handle, unsigned int type ) DECLSPEC_HIDDEN;
 
@@ -86,10 +110,28 @@ typedef struct tagWND
     DWORD              wExtra[1];     /* Window extra bytes */
 } WND;
 
+/* WND flags values */
+#define WIN_RESTORE_MAX           0x0001 /* Maximize when restoring */
+#define WIN_NEED_SIZE             0x0002 /* Internal WM_SIZE is needed */
+#define WIN_NCACTIVATED           0x0004 /* last WM_NCACTIVATE was positive */
+#define WIN_ISMDICLIENT           0x0008 /* Window is an MDIClient */
+#define WIN_ISUNICODE             0x0010 /* Window is Unicode */
+#define WIN_NEEDS_SHOW_OWNEDPOPUP 0x0020 /* WM_SHOWWINDOW:SC_SHOW must be sent in the next ShowOwnedPopup call */
+#define WIN_CHILDREN_MOVED        0x0040 /* children may have moved, ignore stored positions */
+#define WIN_HAS_IME_WIN           0x0080 /* the window has been registered with imm32 */
+
 #define WND_OTHER_PROCESS ((WND *)1)  /* returned by WIN_GetPtr on unknown window handles */
 #define WND_DESKTOP       ((WND *)2)  /* returned by WIN_GetPtr on the desktop window */
 
-WND *next_thread_window_ptr( HWND *hwnd );
+/* check if hwnd is a broadcast magic handle */
+static inline BOOL is_broadcast( HWND hwnd )
+{
+    return hwnd == HWND_BROADCAST || hwnd == HWND_TOPMOST;
+}
+
+#define WM_IME_INTERNAL 0x287
+#define IME_INTERNAL_ACTIVATE 0x17
+#define IME_INTERNAL_DEACTIVATE 0x18
 
 /* this is the structure stored in TEB->Win32ClientInfo */
 /* no attempt is made to keep the layout compatible with the Windows one */
@@ -117,6 +159,7 @@ struct user_thread_info
     HWND                          top_window;             /* Desktop window */
     HWND                          msg_window;             /* HWND_MESSAGE parent window */
     struct rawinput_thread_data  *rawinput;               /* RawInput thread local data / buffer */
+    UINT                          spy_indent;             /* Current spy indent */
 };
 
 C_ASSERT( sizeof(struct user_thread_info) <= sizeof(((TEB *)0)->Win32ClientInfo) );
@@ -128,13 +171,135 @@ struct user_key_state_info
     BYTE  state[256];    /* State for each key */
 };
 
+struct hook_extra_info
+{
+    HHOOK handle;
+    LPARAM lparam;
+};
+
+enum builtin_winprocs
+{
+    /* dual A/W procs */
+    WINPROC_BUTTON = 0,
+    WINPROC_COMBO,
+    WINPROC_DEFWND,
+    WINPROC_DIALOG,
+    WINPROC_EDIT,
+    WINPROC_LISTBOX,
+    WINPROC_MDICLIENT,
+    WINPROC_SCROLLBAR,
+    WINPROC_STATIC,
+    WINPROC_IME,
+    /* unicode-only procs */
+    WINPROC_DESKTOP,
+    WINPROC_ICONTITLE,
+    WINPROC_MENU,
+    WINPROC_MESSAGE,
+    NB_BUILTIN_WINPROCS,
+    NB_BUILTIN_AW_WINPROCS = WINPROC_DESKTOP
+};
+
+struct menu_item;
+
+/* FIXME: make it private to menu.c */
+typedef struct
+{
+    struct user_object obj;
+    WORD        wFlags;       /* Menu flags (MF_POPUP, MF_SYSMENU) */
+    WORD	Width;        /* Width of the whole menu */
+    WORD	Height;       /* Height of the whole menu */
+    UINT        nItems;       /* Number of items in the menu */
+    HWND        hWnd;         /* Window containing the menu */
+    struct menu_item *items;  /* Array of menu items */
+    UINT        FocusedItem;  /* Currently focused item */
+    HWND	hwndOwner;    /* window receiving the messages for ownerdraw */
+    BOOL        bScrolling;   /* Scroll arrows are active */
+    UINT        nScrollPos;   /* Current scroll position */
+    UINT        nTotalHeight; /* Total height of menu items inside menu */
+    RECT        items_rect;   /* Rectangle within which the items lie.  Excludes margins and scroll arrows */
+    LONG        refcount;
+    /* ------------ MENUINFO members ------ */
+    DWORD	dwStyle;	/* Extended menu style */
+    UINT	cyMax;		/* max height of the whole menu, 0 is screen height */
+    HBRUSH	hbrBack;	/* brush for menu background */
+    DWORD	dwContextHelpID;
+    ULONG_PTR	dwMenuData;	/* application defined value */
+    HMENU       hSysMenuOwner;  /* Handle to the dummy sys menu holder */
+    WORD        textOffset;     /* Offset of text when items have both bitmaps and text */
+} POPUPMENU, *LPPOPUPMENU;
+
+/* FIXME: make it private to class.c */
+typedef struct tagWINDOWPROC
+{
+    WNDPROC        procA;    /* ANSI window proc */
+    WNDPROC        procW;    /* Unicode window proc */
+} WINDOWPROC;
+
+#define WINPROC_HANDLE (~0u >> 16)
+#define BUILTIN_WINPROC(index) ((WNDPROC)(ULONG_PTR)((index) | (WINPROC_HANDLE << 16)))
+
+#define MAX_ATOM_LEN 255
+
+/* Built-in class names (see _Undocumented_Windows_ p.418) */
+#define POPUPMENU_CLASS_ATOM MAKEINTATOM(32768)  /* PopupMenu */
+#define DESKTOP_CLASS_ATOM   MAKEINTATOM(32769)  /* Desktop */
+#define DIALOG_CLASS_ATOM    MAKEINTATOM(32770)  /* Dialog */
+#define WINSWITCH_CLASS_ATOM MAKEINTATOM(32771)  /* WinSwitch */
+#define ICONTITLE_CLASS_ATOM MAKEINTATOM(32772)  /* IconTitle */
+
+/* message spy definitions */
+
+#define SPY_DISPATCHMESSAGE       0x0100
+#define SPY_SENDMESSAGE           0x0101
+#define SPY_DEFWNDPROC            0x0102
+
+#define SPY_RESULT_OK             0x0001
+#define SPY_RESULT_DEFWND         0x0002
+
+extern const char *debugstr_msg_name( UINT msg, HWND hwnd ) DECLSPEC_HIDDEN;
+extern const char *debugstr_vkey_name( WPARAM wParam ) DECLSPEC_HIDDEN;
+extern void spy_enter_message( INT flag, HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
+extern void spy_exit_message( INT flag, HWND hwnd, UINT msg,
+                              LRESULT lreturn, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
+
+/* class.c */
+WNDPROC alloc_winproc( WNDPROC func, BOOL ansi ) DECLSPEC_HIDDEN;
+WINDOWPROC *get_winproc_ptr( WNDPROC handle ) DECLSPEC_HIDDEN;
+BOOL is_winproc_unicode( WNDPROC proc, BOOL def_val ) DECLSPEC_HIDDEN;
+DWORD get_class_long( HWND hwnd, INT offset, BOOL ansi ) DECLSPEC_HIDDEN;
+WNDPROC get_class_winproc( struct tagCLASS *class ) DECLSPEC_HIDDEN;
+ULONG_PTR get_class_long_ptr( HWND hwnd, INT offset, BOOL ansi ) DECLSPEC_HIDDEN;
+WORD get_class_word( HWND hwnd, INT offset ) DECLSPEC_HIDDEN;
+ATOM get_int_atom_value( UNICODE_STRING *name ) DECLSPEC_HIDDEN;
+WNDPROC get_winproc( WNDPROC proc, BOOL ansi ) DECLSPEC_HIDDEN;
+void get_winproc_params( struct win_proc_params *params ) DECLSPEC_HIDDEN;
+struct dce *get_class_dce( struct tagCLASS *class ) DECLSPEC_HIDDEN;
+struct dce *set_class_dce( struct tagCLASS *class, struct dce *dce ) DECLSPEC_HIDDEN;
+
 /* cursoricon.c */
 HICON alloc_cursoricon_handle( BOOL is_icon ) DECLSPEC_HIDDEN;
+
+/* dce.c */
+extern void free_dce( struct dce *dce, HWND hwnd ) DECLSPEC_HIDDEN;
+extern void invalidate_dce( WND *win, const RECT *extra_rect ) DECLSPEC_HIDDEN;
+
+/* message.c */
+LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
 
 /* window.c */
 HANDLE alloc_user_handle( struct user_object *ptr, unsigned int type ) DECLSPEC_HIDDEN;
 void *free_user_handle( HANDLE handle, unsigned int type ) DECLSPEC_HIDDEN;
 void *get_user_handle_ptr( HANDLE handle, unsigned int type ) DECLSPEC_HIDDEN;
 void release_user_handle_ptr( void *ptr ) DECLSPEC_HIDDEN;
+UINT win_set_flags( HWND hwnd, UINT set_mask, UINT clear_mask ) DECLSPEC_HIDDEN;
+
+static inline UINT win_get_flags( HWND hwnd )
+{
+    return win_set_flags( hwnd, 0, 0 );
+}
+
+WND *get_win_ptr( HWND hwnd ) DECLSPEC_HIDDEN;
+BOOL is_child( HWND parent, HWND child );
+BOOL is_window( HWND hwnd ) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_NTUSER_PRIVATE_H */

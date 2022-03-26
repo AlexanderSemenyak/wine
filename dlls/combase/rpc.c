@@ -522,6 +522,78 @@ static HRESULT create_server(REFCLSID rclsid, HANDLE *process)
     return S_OK;
 }
 
+static HRESULT create_surrogate_server(REFCLSID rclsid, HANDLE *process)
+{
+    static const WCHAR processidW[] = L" /PROCESSID:";
+    HKEY key;
+    int arch = (sizeof(void *) > sizeof(int)) ? 64 : 32;
+    REGSAM opposite = (arch == 64) ? KEY_WOW64_32KEY : KEY_WOW64_64KEY;
+    BOOL is_wow64 = FALSE;
+    HRESULT hr;
+    WCHAR command[MAX_PATH + ARRAY_SIZE(processidW) + CHARS_IN_GUID];
+    DWORD size;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    LONG ret;
+
+    TRACE("Attempting to start surrogate server for %s\n", debugstr_guid(rclsid));
+
+    hr = open_appidkey_from_clsid(rclsid, KEY_READ, &key);
+    if (FAILED(hr) && (arch == 64 || (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64)))
+    {
+        hr = open_appidkey_from_clsid(rclsid, opposite | KEY_READ, &key);
+        if (FAILED(hr)) return hr;
+    }
+
+    size = (MAX_PATH + 1) * sizeof(WCHAR);
+    ret = RegQueryValueExW(key, L"DllSurrogate", NULL, NULL, (LPBYTE)command, &size);
+    RegCloseKey(key);
+    if (ret || !size || !command[0])
+    {
+        TRACE("No value for DllSurrogate key\n");
+
+        if ((sizeof(void *) == 8 || is_wow64) && opposite == KEY_WOW64_32KEY)
+            GetSystemWow64DirectoryW(command, MAX_PATH - ARRAY_SIZE(L"\\dllhost.exe"));
+        else
+            GetSystemDirectoryW(command, MAX_PATH - ARRAY_SIZE(L"\\dllhost.exe"));
+
+        wcscat(command, L"\\dllhost.exe");
+    }
+
+    /* Surrogate EXE servers are started with the /PROCESSID:{GUID} switch. */
+    wcscat(command, processidW);
+    StringFromGUID2(rclsid, command + wcslen(command), CHARS_IN_GUID);
+
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+
+    TRACE("Activating surrogate local server %s\n", debugstr_w(command));
+
+    if (is_wow64 && arch == 64)
+    {
+        void *cookie;
+        Wow64DisableWow64FsRedirection(&cookie);
+        if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
+        {
+            WARN("failed to run surrogate local server %s\n", debugstr_w(command));
+            hr = HRESULT_FROM_WIN32(GetLastError());
+        }
+        Wow64RevertWow64FsRedirection(cookie);
+    }
+    else if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
+    {
+        WARN("failed to run surrogate local server %s\n", debugstr_w(command));
+        hr = HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    if (FAILED(hr)) return hr;
+
+    *process = pi.hProcess;
+    CloseHandle(pi.hThread);
+
+    return S_OK;
+}
+
 HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
 {
     PMInterfacePointer objref = NULL;
@@ -546,7 +618,8 @@ HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
 
         if (tries == 1)
         {
-            if ((hr = create_local_service(rclsid)) && (hr = create_server(rclsid, &process)) )
+            if ((hr = create_local_service(rclsid)) && (hr = create_server(rclsid, &process)) &&
+                (hr = create_surrogate_server(rclsid, &process)) )
                 return hr;
         }
 

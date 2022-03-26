@@ -565,7 +565,7 @@ void info_win32_processes(void)
     }
 }
 
-static BOOL get_process_name(DWORD pid, PROCESSENTRY32* entry)
+static BOOL get_process_name(DWORD pid, PROCESSENTRY32W* entry)
 {
     BOOL   ret = FALSE;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -573,9 +573,9 @@ static BOOL get_process_name(DWORD pid, PROCESSENTRY32* entry)
     if (snap != INVALID_HANDLE_VALUE)
     {
         entry->dwSize = sizeof(*entry);
-        if (Process32First(snap, entry))
+        if (Process32FirstW(snap, entry))
             while (!(ret = (entry->th32ProcessID == pid)) &&
-                   Process32Next(snap, entry));
+                   Process32NextW(snap, entry));
         CloseHandle(snap);
     }
     return ret;
@@ -589,12 +589,14 @@ void info_win32_threads(void)
         THREADENTRY32	entry;
         BOOL 		ok;
 	DWORD		lastProcessId = 0;
+        struct dbg_process* p = NULL;
+        struct dbg_thread* t = NULL;
 
 	entry.dwSize = sizeof(entry);
 	ok = Thread32First(snap, &entry);
 
-        dbg_printf("%-8.8s %-8.8s %s (all id:s are in hex)\n",
-                   "process", "tid", "prio");
+        dbg_printf("%-8.8s %-8.8s %s    %s (all IDs are in hex)\n",
+                   "process", "tid", "prio", "name");
         while (ok)
         {
             if (entry.th32OwnerProcessID != GetCurrentProcessId())
@@ -605,24 +607,26 @@ void info_win32_threads(void)
 		 */
 		if (entry.th32OwnerProcessID != lastProcessId)
 		{
-		    struct dbg_process*	p = dbg_get_process(entry.th32OwnerProcessID);
-                    PROCESSENTRY32 pcs_entry;
-                    const char* exename;
+                    PROCESSENTRY32W pcs_entry;
+                    const WCHAR* exename;
 
+                    p = dbg_get_process(entry.th32OwnerProcessID);
                     if (p)
-                        exename = dbg_W2A(p->imageName, -1);
+                        exename = p->imageName;
                     else if (get_process_name(entry.th32OwnerProcessID, &pcs_entry))
                         exename = pcs_entry.szExeFile;
                     else
-                        exename = "";
+                        exename = L"";
 
-		    dbg_printf("%08lx%s %s\n",
+		    dbg_printf("%08lx%s %ls\n",
                                entry.th32OwnerProcessID, p ? " (D)" : "", exename);
                     lastProcessId = entry.th32OwnerProcessID;
 		}
-                dbg_printf("\t%08lx %4ld%s\n",
+                t = dbg_get_thread(p, entry.th32ThreadID);
+                dbg_printf("\t%08lx %4ld%s %s\n",
                            entry.th32ThreadID, entry.tpBasePri,
-                           (entry.th32ThreadID == dbg_curr_tid) ? " <==" : "");
+                           (entry.th32ThreadID == dbg_curr_tid) ? " <==" : "    ",
+                           t ? t->name : "");
 
 	    }
             ok = Thread32Next(snap, &entry);

@@ -35,7 +35,7 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "winternl.h"
-#include "dshow.h"
+#include "mferror.h"
 
 #include "unix_private.h"
 
@@ -46,15 +46,26 @@ struct wg_transform
 {
     GstElement *container;
     GstPad *my_src, *my_sink;
+    GstPad *their_sink, *their_src;
+    GstSegment segment;
+    GstBuffer *input;
+
+    pthread_mutex_t mutex;
+    GstBuffer *output;
 };
 
 static GstFlowReturn transform_sink_chain_cb(GstPad *pad, GstObject *parent, GstBuffer *buffer)
 {
     struct wg_transform *transform = gst_pad_get_element_private(pad);
 
-    GST_INFO("transform %p, buffer %p.", transform, buffer);
+    GST_LOG("transform %p, buffer %p.", transform, buffer);
 
-    gst_buffer_unref(buffer);
+    pthread_mutex_lock(&transform->mutex);
+    if (transform->output)
+        transform->output = gst_buffer_append(transform->output, buffer);
+    else
+        transform->output = buffer;
+    pthread_mutex_unlock(&transform->mutex);
 
     return GST_FLOW_OK;
 }
@@ -63,10 +74,18 @@ NTSTATUS wg_transform_destroy(void *args)
 {
     struct wg_transform *transform = args;
 
+    if (transform->input)
+        gst_buffer_unref(transform->input);
+    if (transform->output)
+        gst_buffer_unref(transform->output);
+
     gst_element_set_state(transform->container, GST_STATE_NULL);
+    g_object_unref(transform->their_sink);
+    g_object_unref(transform->their_src);
     g_object_unref(transform->container);
     g_object_unref(transform->my_sink);
     g_object_unref(transform->my_src);
+    pthread_mutex_destroy(&transform->mutex);
     free(transform);
 
     return STATUS_SUCCESS;
@@ -151,6 +170,7 @@ NTSTATUS wg_transform_create(void *args)
     GstPadTemplate *template = NULL;
     struct wg_transform *transform;
     const gchar *media_type;
+    GstEvent *event;
 
     if (!init_gstreamer())
         return STATUS_UNSUCCESSFUL;
@@ -158,25 +178,25 @@ NTSTATUS wg_transform_create(void *args)
     if (!(transform = calloc(1, sizeof(*transform))))
         return STATUS_NO_MEMORY;
     if (!(transform->container = gst_bin_new("wg_transform")))
-        goto out_free_transform;
+        goto out;
 
     if (!(src_caps = wg_format_to_caps(&input_format)))
-        goto out_free_container;
+        goto out;
     if (!(template = gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, src_caps)))
-        goto out_free_src_caps;
+        goto out;
     transform->my_src = gst_pad_new_from_template(template, "src");
     g_object_unref(template);
     if (!transform->my_src)
-        goto out_free_src_caps;
+        goto out;
 
     if (!(sink_caps = wg_format_to_caps(&output_format)))
-        goto out_free_src_pad;
+        goto out;
     if (!(template = gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, sink_caps)))
-        goto out_free_sink_caps;
+        goto out;
     transform->my_sink = gst_pad_new_from_template(template, "sink");
     g_object_unref(template);
     if (!transform->my_sink)
-        goto out_free_sink_caps;
+        goto out;
 
     gst_pad_set_element_private(transform->my_sink, transform);
     gst_pad_set_chain_function(transform->my_sink, transform_sink_chain_cb);
@@ -187,7 +207,7 @@ NTSTATUS wg_transform_create(void *args)
      */
     media_type = gst_structure_get_name(gst_caps_get_structure(sink_caps, 0));
     if (!(raw_caps = gst_caps_new_empty_simple(media_type)))
-        goto out_free_sink_pad;
+        goto out;
 
     switch (input_format.major_type)
     {
@@ -196,7 +216,7 @@ NTSTATUS wg_transform_create(void *args)
                     || !transform_append_element(transform, element, &first, &last))
             {
                 gst_caps_unref(raw_caps);
-                goto out_free_sink_pad;
+                goto out;
             }
             break;
 
@@ -205,7 +225,7 @@ NTSTATUS wg_transform_create(void *args)
         case WG_MAJOR_TYPE_UNKNOWN:
             GST_FIXME("Format %u not implemented!", input_format.major_type);
             gst_caps_unref(raw_caps);
-            goto out_free_sink_pad;
+            goto out;
     }
 
     gst_caps_unref(raw_caps);
@@ -224,42 +244,176 @@ NTSTATUS wg_transform_create(void *args)
              */
             if (!(element = create_element("audioconvert", "base"))
                     || !transform_append_element(transform, element, &first, &last))
-                goto out_free_sink_pad;
+                goto out;
             if (!(element = create_element("audioresample", "base"))
                     || !transform_append_element(transform, element, &first, &last))
-                goto out_free_sink_pad;
+                goto out;
             break;
 
         case WG_MAJOR_TYPE_VIDEO:
         case WG_MAJOR_TYPE_WMA:
         case WG_MAJOR_TYPE_UNKNOWN:
             GST_FIXME("Format %u not implemented!", output_format.major_type);
-            goto out_free_sink_pad;
+            goto out;
     }
+
+    if (!(transform->their_sink = gst_element_get_static_pad(first, "sink")))
+        goto out;
+    if (!(transform->their_src = gst_element_get_static_pad(last, "src")))
+        goto out;
+    if (gst_pad_link(transform->my_src, transform->their_sink) < 0)
+        goto out;
+    if (gst_pad_link(transform->their_src, transform->my_sink) < 0)
+        goto out;
+    if (!gst_pad_set_active(transform->my_sink, 1))
+        goto out;
+    if (!gst_pad_set_active(transform->my_src, 1))
+        goto out;
 
     gst_element_set_state(transform->container, GST_STATE_PAUSED);
     if (!gst_element_get_state(transform->container, NULL, NULL, -1))
-        goto out_free_sink_pad;
+        goto out;
+
+    if (!(event = gst_event_new_stream_start("stream"))
+            || !gst_pad_push_event(transform->my_src, event))
+        goto out;
+    if (!(event = gst_event_new_caps(src_caps))
+            || !gst_pad_push_event(transform->my_src, event))
+        goto out;
+
+    /* We need to use GST_FORMAT_TIME here because it's the only format
+     * some elements such avdec_wmav2 correctly support. */
+    gst_segment_init(&transform->segment, GST_FORMAT_TIME);
+    transform->segment.start = 0;
+    transform->segment.stop = -1;
+    if (!(event = gst_event_new_segment(&transform->segment))
+            || !gst_pad_push_event(transform->my_src, event))
+        goto out;
 
     gst_caps_unref(sink_caps);
     gst_caps_unref(src_caps);
+
+    pthread_mutex_init(&transform->mutex, NULL);
 
     GST_INFO("Created winegstreamer transform %p.", transform);
     params->transform = transform;
     return STATUS_SUCCESS;
 
-out_free_sink_pad:
-    gst_object_unref(transform->my_sink);
-out_free_sink_caps:
-    gst_caps_unref(sink_caps);
-out_free_src_pad:
-    gst_object_unref(transform->my_src);
-out_free_src_caps:
-    gst_caps_unref(src_caps);
-out_free_container:
-    gst_object_unref(transform->container);
-out_free_transform:
+out:
+    if (transform->their_sink)
+        gst_object_unref(transform->their_sink);
+    if (transform->their_src)
+        gst_object_unref(transform->their_src);
+    if (transform->my_sink)
+        gst_object_unref(transform->my_sink);
+    if (sink_caps)
+        gst_caps_unref(sink_caps);
+    if (transform->my_src)
+        gst_object_unref(transform->my_src);
+    if (src_caps)
+        gst_caps_unref(src_caps);
+    if (transform->container)
+    {
+        gst_element_set_state(transform->container, GST_STATE_NULL);
+        gst_object_unref(transform->container);
+    }
     free(transform);
     GST_ERROR("Failed to create winegstreamer transform.");
+    return status;
+}
+
+NTSTATUS wg_transform_push_data(void *args)
+{
+    struct wg_transform_push_data_params *params = args;
+    struct wg_transform *transform = params->transform;
+    struct wg_sample *sample = params->sample;
+    GstBuffer *buffer;
+
+    if (transform->input)
+    {
+        GST_INFO("Refusing %u bytes, a buffer is already queued", sample->size);
+        params->result = MF_E_NOTACCEPTING;
+        return STATUS_SUCCESS;
+    }
+
+    if (!(buffer = gst_buffer_new_and_alloc(sample->size)))
+    {
+        GST_ERROR("Failed to allocate input buffer");
+        return STATUS_NO_MEMORY;
+    }
+    gst_buffer_fill(buffer, 0, sample->data, sample->size);
+    transform->input = buffer;
+
+    GST_INFO("Copied %u bytes from sample %p to input buffer", sample->size, sample);
+    params->result = S_OK;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS read_transform_output_data(struct wg_transform *transform,
+        struct wg_sample *sample)
+{
+    GstBuffer *buffer = transform->output;
+    GstMapInfo info;
+
+    if (!gst_buffer_map(buffer, &info, GST_MAP_READ))
+    {
+        GST_ERROR("Failed to map buffer %p", buffer);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    if (sample->max_size >= info.size)
+        sample->size = info.size;
+    else
+    {
+        sample->flags |= WG_SAMPLE_FLAG_INCOMPLETE;
+        sample->size = sample->max_size;
+    }
+
+    memcpy(sample->data, info.data, sample->size);
+    gst_buffer_unmap(buffer, &info);
+    gst_buffer_resize(buffer, sample->size, -1);
+
+    if (info.size <= sample->size)
+    {
+        gst_buffer_unref(transform->output);
+        transform->output = NULL;
+    }
+
+    GST_INFO("Copied %u bytes, sample %p, flags %#x", sample->size, sample, sample->flags);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS wg_transform_read_data(void *args)
+{
+    struct wg_transform_read_data_params *params = args;
+    struct wg_transform *transform = params->transform;
+    struct wg_sample *sample = params->sample;
+    GstFlowReturn ret;
+    NTSTATUS status;
+
+    if (!transform->input)
+        GST_DEBUG("Not input buffer queued");
+    else if ((ret = gst_pad_push(transform->my_src, transform->input)))
+    {
+        GST_ERROR("Failed to push transform input, error %d", ret);
+        return STATUS_UNSUCCESSFUL;
+    }
+    transform->input = NULL;
+
+    sample->size = 0;
+    pthread_mutex_lock(&transform->mutex);
+    if (transform->output)
+    {
+        params->result = S_OK;
+        status = read_transform_output_data(transform, sample);
+    }
+    else
+    {
+        params->result = MF_E_TRANSFORM_NEED_MORE_INPUT;
+        status = STATUS_SUCCESS;
+        GST_INFO("Cannot read %u bytes, no output available", sample->max_size);
+    }
+    pthread_mutex_unlock(&transform->mutex);
+
     return status;
 }

@@ -96,6 +96,8 @@ void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
 struct wg_transform *wg_transform_create(const struct wg_format *input_format,
         const struct wg_format *output_format);
 void wg_transform_destroy(struct wg_transform *transform);
+HRESULT wg_transform_push_data(struct wg_transform *transform, struct wg_sample *sample);
+HRESULT wg_transform_read_data(struct wg_transform *transform, struct wg_sample *sample);
 
 unsigned int wg_format_get_max_size(const struct wg_format *format);
 
@@ -116,8 +118,12 @@ extern HRESULT mfplat_DllRegisterServer(void);
 IMFMediaType *mf_media_type_from_wg_format(const struct wg_format *format);
 void mf_media_type_to_wg_format(IMFMediaType *type, struct wg_format *format);
 
+HRESULT mf_create_wg_sample(IMFSample *sample, struct wg_sample **out);
+void mf_destroy_wg_sample(struct wg_sample *wg_sample);
+
 HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj);
 
+HRESULT h264_decoder_create(REFIID riid, void **ret);
 HRESULT audio_converter_create(REFIID riid, void **ret);
 
 struct wm_stream
@@ -180,8 +186,8 @@ HRESULT wm_reader_get_output_props(struct wm_reader *reader, DWORD output,
         IWMOutputMediaProps **props);
 struct wm_stream *wm_reader_get_stream_by_stream_number(struct wm_reader *reader,
         WORD stream_number);
-HRESULT wm_reader_get_stream_sample(struct wm_stream *stream,
-        INSSBuffer **sample, QWORD *pts, QWORD *duration, DWORD *flags);
+HRESULT wm_reader_get_stream_sample(struct wm_reader *reader, WORD stream_number,
+        INSSBuffer **ret_sample, QWORD *pts, QWORD *duration, DWORD *flags, WORD *ret_stream_number);
 HRESULT wm_reader_get_stream_selection(struct wm_reader *reader,
         WORD stream_number, WMT_STREAM_SELECTION *selection);
 void wm_reader_init(struct wm_reader *reader, const struct wm_reader_ops *ops);

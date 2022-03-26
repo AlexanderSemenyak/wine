@@ -1120,8 +1120,13 @@ static void add_monitor( const struct gdi_monitor *monitor, void *param )
 
     if ((subkey = reg_create_key( hkey, device_parametersW, sizeof(device_parametersW), 0, NULL )))
     {
+        static const WCHAR bad_edidW[] = {'B','A','D','_','E','D','I','D',0};
         static const WCHAR edidW[] = {'E','D','I','D',0};
-        set_reg_value( subkey, edidW, REG_BINARY, monitor->edid, monitor->edid_len );
+
+        if (monitor->edid_len)
+            set_reg_value( subkey, edidW, REG_BINARY, monitor->edid, monitor->edid_len );
+        else
+            set_reg_value( subkey, bad_edidW, REG_BINARY, NULL, 0 );
         NtClose( subkey );
     }
 
@@ -1327,7 +1332,6 @@ static BOOL update_display_cache(void)
         ERR( "failed to read display config\n" );
         return FALSE;
     }
-
     return TRUE;
 }
 
@@ -1343,7 +1347,7 @@ static void unlock_display_devices(void)
     pthread_mutex_unlock( &display_lock );
 }
 
-HDC get_display_dc(void)
+static HDC get_display_dc(void)
 {
     pthread_mutex_lock( &display_dc_lock );
     if (!display_dc)
@@ -1361,7 +1365,7 @@ HDC get_display_dc(void)
     return display_dc;
 }
 
-void release_display_dc( HDC hdc )
+static void release_display_dc( HDC hdc )
 {
     pthread_mutex_unlock( &display_dc_lock );
 }
@@ -1376,9 +1380,18 @@ UINT get_monitor_dpi( HMONITOR monitor )
 }
 
 /**********************************************************************
+ *              get_win_monitor_dpi
+ */
+UINT get_win_monitor_dpi( HWND hwnd )
+{
+    /* FIXME: use the monitor DPI instead */
+    return system_dpi;
+}
+
+/**********************************************************************
  *           get_thread_dpi_awareness
  */
-static DPI_AWARENESS get_thread_dpi_awareness(void)
+DPI_AWARENESS get_thread_dpi_awareness(void)
 {
     struct user_thread_info *info = get_user_thread_info();
     ULONG_PTR context = info->dpi_awareness;
@@ -1421,6 +1434,48 @@ UINT get_system_dpi(void)
 {
     if (get_thread_dpi_awareness() == DPI_AWARENESS_UNAWARE) return USER_DEFAULT_SCREEN_DPI;
     return system_dpi;
+}
+
+/* see GetAwarenessFromDpiAwarenessContext */
+static DPI_AWARENESS get_awareness_from_dpi_awareness_context( DPI_AWARENESS_CONTEXT context )
+{
+    switch ((ULONG_PTR)context)
+    {
+    case 0x10:
+    case 0x11:
+    case 0x12:
+    case 0x80000010:
+    case 0x80000011:
+    case 0x80000012:
+        return (ULONG_PTR)context & 3;
+    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_UNAWARE:
+    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_SYSTEM_AWARE:
+    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE:
+        return ~(ULONG_PTR)context;
+    default:
+        return DPI_AWARENESS_INVALID;
+    }
+}
+
+/* see SetThreadDpiAwarenessContext */
+DPI_AWARENESS_CONTEXT set_thread_dpi_awareness_context( DPI_AWARENESS_CONTEXT context )
+{
+    struct user_thread_info *info = get_user_thread_info();
+    DPI_AWARENESS prev, val = get_awareness_from_dpi_awareness_context( context );
+
+    if (val == DPI_AWARENESS_INVALID)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    if (!(prev = info->dpi_awareness))
+    {
+        prev = NtUserGetProcessDpiAwarenessContext( GetCurrentProcess() ) & 3;
+        prev |= 0x80000010;  /* restore to process default */
+    }
+    if (((ULONG_PTR)context & ~(ULONG_PTR)0x13) == 0x80000000) info->dpi_awareness = 0;
+    else info->dpi_awareness = val | 0x10;
+    return ULongToHandle( prev );
 }
 
 /**********************************************************************
@@ -1500,7 +1555,7 @@ RECT get_display_rect( const WCHAR *display )
     return map_dpi_rect( rect, system_dpi, get_thread_dpi() );
 }
 
-static RECT get_primary_monitor_rect( UINT dpi )
+RECT get_primary_monitor_rect( UINT dpi )
 {
     struct monitor *monitor;
     RECT rect = {0};
@@ -1932,7 +1987,7 @@ BOOL WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc
     return ret;
 }
 
-static BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info )
+BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info )
 {
     struct monitor *monitor;
     UINT dpi_from, dpi_to;
@@ -2046,6 +2101,27 @@ HMONITOR monitor_from_point( POINT pt, DWORD flags, UINT dpi )
 {
     RECT rect;
     SetRect( &rect, pt.x, pt.y, pt.x + 1, pt.y + 1 );
+    return monitor_from_rect( &rect, flags, dpi );
+}
+
+/* see MonitorFromWindow */
+HMONITOR monitor_from_window( HWND hwnd, DWORD flags, UINT dpi )
+{
+    RECT rect;
+    WINDOWPLACEMENT wp;
+
+    TRACE( "(%p, 0x%08x)\n", hwnd, flags );
+
+    wp.length = sizeof(wp);
+    if (is_iconic( hwnd ) && get_window_placement( hwnd, &wp ))
+        return monitor_from_rect( &wp.rcNormalPosition, flags, dpi );
+
+    if (get_window_rect( hwnd, &rect, dpi ))
+        return monitor_from_rect( &rect, flags, dpi );
+
+    if (!(flags & (MONITOR_DEFAULTTOPRIMARY|MONITOR_DEFAULTTONEAREST))) return 0;
+    /* retrieve the primary */
+    SetRect( &rect, 0, 0, 1, 1 );
     return monitor_from_rect( &rect, flags, dpi );
 }
 
@@ -4464,8 +4540,7 @@ BOOL WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *va
     user_callbacks->pSendMessageTimeoutW( HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0,
                                           SMTO_ABORTIFHUNG, 2000, NULL );
     /* Repaint affected portions of all visible windows */
-    user_callbacks->pRedrawWindow( 0, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW |
-                                   RDW_ALLCHILDREN );
+    NtUserRedrawWindow( 0, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN );
     return TRUE;
 }
 
@@ -4516,6 +4591,16 @@ static BOOL message_beep( UINT i )
     return TRUE;
 }
 
+static DWORD exiting_thread_id;
+
+/**********************************************************************
+ *           is_exiting_thread
+ */
+BOOL is_exiting_thread( DWORD tid )
+{
+    return tid == exiting_thread_id;
+}
+
 static void thread_detach(void)
 {
     struct user_thread_info *thread_info = get_user_thread_info();
@@ -4524,18 +4609,32 @@ static void thread_detach(void)
 
     free( thread_info->key_state );
     thread_info->key_state = 0;
+
+    destroy_thread_windows();
+    NtClose( thread_info->server_queue );
+
+    exiting_thread_id = 0;
 }
 
 /***********************************************************************
- *	     NtUserCallOneParam    (win32u.@)
+ *	     NtUserCallNoParam    (win32u.@)
  */
 ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 {
     switch(code)
     {
+    case NtUserCreateMenu:
+        return HandleToUlong( create_menu() );
+    case NtUserGetDesktopWindow:
+        return HandleToUlong( get_desktop_window() );
     case NtUserGetInputState:
         return get_input_state();
+    case NtUserReleaseCapture:
+        return release_capture();
     /* temporary exports */
+    case NtUserExitingThread:
+        exiting_thread_id = GetCurrentThreadId();
+        return 0;
     case NtUserThreadDetach:
         thread_detach();
         return 0;
@@ -4552,8 +4651,14 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
 {
     switch(code)
     {
+    case NtUserBeginDeferWindowPos:
+        return HandleToUlong( begin_defer_window_pos( arg ));
     case NtUserCreateCursorIcon:
         return HandleToUlong( alloc_cursoricon_handle( arg ));
+    case NtUserDispatchMessageA:
+        return dispatch_message( (const MSG *)arg, TRUE );
+    case NtUserEnableDC:
+        return set_dce_flags( UlongToHandle(arg), DCHF_ENABLEDC );
     case NtUserGetClipCursor:
         return get_clip_cursor( (RECT *)arg );
     case NtUserGetCursorPos:
@@ -4579,11 +4684,24 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
     case NtUserMessageBeep:
         return message_beep( arg );
     /* temporary exports */
+    case NtUserCallHooks:
+        {
+            const struct win_hook_params *params = (struct win_hook_params *)arg;
+            return call_hooks( params->id, params->code, params->wparam, params->lparam,
+                               params->next_unicode );
+        }
     case NtUserFlushWindowSurfaces:
         flush_window_surfaces( arg );
         return 0;
     case NtUserGetDeskPattern:
         return get_entry( &entry_DESKPATTERN, 256, (WCHAR *)arg );
+    case NtUserGetWinProcPtr:
+        return (UINT_PTR)get_winproc_ptr( UlongToHandle(arg) );
+    case NtUserHandleInternalMessage:
+        {
+            MSG *msg = (MSG *)arg;
+            return handle_internal_message( msg->hwnd, msg->message, msg->wParam, msg->lParam );
+        }
     case NtUserIncrementKeyStateCounter:
         return InterlockedAdd( &global_key_state_counter, arg );
     case NtUserLock:
@@ -4593,10 +4711,10 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
         case 1: user_unlock(); return 0;
         default: user_check_not_lock(); return 0;
         }
-    case NtUserNextThreadWindow:
-        return (UINT_PTR)next_thread_window_ptr( (HWND *)arg );
     case NtUserSetCallbacks:
         return (UINT_PTR)InterlockedExchangePointer( (void **)&user_callbacks, (void *)arg );
+    case NtUserSpyGetVKeyName:
+        return (UINT_PTR)debugstr_vkey_name( arg );
     default:
         FIXME( "invalid code %u\n", code );
         return 0;
@@ -4623,18 +4741,10 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
     case NtUserUnhookWindowsHook:
         return unhook_windows_hook( arg1, (HOOKPROC)arg2 );
     /* temporary exports */
-    case NtUserAllocHandle:
-        return HandleToUlong( alloc_user_handle( (struct user_object *)arg1, arg2 ));
-    case NtUserFreeHandle:
-        return (UINT_PTR)free_user_handle( UlongToHandle(arg1), arg2 );
+    case NtUserAllocWinProc:
+        return (UINT_PTR)alloc_winproc( (WNDPROC)arg1, arg2 );
     case NtUserGetHandlePtr:
         return (UINT_PTR)get_user_handle_ptr( UlongToHandle(arg1), arg2 );
-    case NtUserRegisterWindowSurface:
-        register_window_surface( (struct window_surface *)arg1, (struct window_surface *)arg2 );
-        return 0;
-    case NtUserSetHandlePtr:
-        set_user_handle_ptr( UlongToHandle(arg1), (struct user_object *)arg2 );
-        return 0;
     default:
         FIXME( "invalid code %u\n", code );
         return 0;

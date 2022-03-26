@@ -113,35 +113,6 @@ static void dbg_outputA(const char* buffer, int len)
     }
 }
 
-const char* dbg_W2A(const WCHAR* buffer, unsigned len)
-{
-    static unsigned ansilen;
-    static char* ansi;
-    unsigned newlen;
-
-    newlen = WideCharToMultiByte(CP_ACP, 0, buffer, len, NULL, 0, NULL, NULL);
-    if (newlen > ansilen)
-    {
-        static char* newansi;
-        if (ansi)
-            newansi = HeapReAlloc(GetProcessHeap(), 0, ansi, newlen);
-        else
-            newansi = HeapAlloc(GetProcessHeap(), 0, newlen);
-        if (!newansi) return NULL;
-        ansilen = newlen;
-        ansi = newansi;
-    }
-    WideCharToMultiByte(CP_ACP, 0, buffer, len, ansi, newlen, NULL, NULL);
-    return ansi;
-}
-
-void	dbg_outputW(const WCHAR* buffer, int len)
-{
-    const char* ansi = dbg_W2A(buffer, len);
-    if (ansi) dbg_outputA(ansi, strlen(ansi));
-    /* FIXME: should CP_ACP be GetConsoleCP()? */
-}
-
 int WINAPIV dbg_printf(const char* format, ...)
 {
     static    char	buf[4*1024];
@@ -444,14 +415,13 @@ struct dbg_thread* dbg_add_thread(struct dbg_process* p, DWORD tid,
     t->step_over_bp.enabled = FALSE;
     t->step_over_bp.refcount = 0;
     t->stopped_xpoint = -1;
+    t->name[0] = '\0';
     t->in_exception = FALSE;
     t->frames = NULL;
     t->num_frames = 0;
     t->curr_frame = -1;
     t->addr_mode = AddrModeFlat;
     t->suspended = FALSE;
-
-    snprintf(t->name, sizeof(t->name), "%04lx", tid);
 
     list_add_head(&p->threads, &t->entry);
 

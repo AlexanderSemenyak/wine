@@ -22,6 +22,24 @@
 #include "d3dcompiler_private.h"
 #include "d3d10.h"
 
+#if !D3D_COMPILER_VERSION
+#define ID3D11ShaderReflection ID3D10ShaderReflection
+#define ID3D11ShaderReflectionVtbl ID3D10ShaderReflectionVtbl
+#define ID3D11ShaderReflectionConstantBuffer ID3D10ShaderReflectionConstantBuffer
+#define ID3D11ShaderReflectionConstantBufferVtbl ID3D10ShaderReflectionConstantBufferVtbl
+#define ID3D11ShaderReflectionType ID3D10ShaderReflectionType
+#define ID3D11ShaderReflectionTypeVtbl ID3D10ShaderReflectionTypeVtbl
+#define ID3D11ShaderReflectionVariable ID3D10ShaderReflectionVariable
+#define ID3D11ShaderReflectionVariableVtbl ID3D10ShaderReflectionVariableVtbl
+#define IID_ID3D11ShaderReflection IID_ID3D10ShaderReflection
+#define D3D11_SHADER_BUFFER_DESC D3D10_SHADER_BUFFER_DESC
+#define D3D11_SHADER_DESC D3D10_SHADER_DESC
+#define D3D11_SHADER_INPUT_BIND_DESC D3D10_SHADER_INPUT_BIND_DESC
+#define D3D11_SHADER_TYPE_DESC D3D10_SHADER_TYPE_DESC
+#define D3D11_SHADER_VARIABLE_DESC D3D10_SHADER_VARIABLE_DESC
+#define D3D11_SIGNATURE_PARAMETER_DESC D3D10_SIGNATURE_PARAMETER_DESC
+#endif
+
 WINE_DEFAULT_DEBUG_CHANNEL(d3dcompiler);
 
 enum D3DCOMPILER_SIGNATURE_ELEMENT_SIZE
@@ -32,6 +50,14 @@ enum D3DCOMPILER_SIGNATURE_ELEMENT_SIZE
 
 #define D3DCOMPILER_SHADER_TARGET_VERSION_MASK 0xffff
 #define D3DCOMPILER_SHADER_TARGET_SHADERTYPE_MASK 0xffff0000
+#define D3DCOMPILER_SHADER_TARGET_SHADERTYPE_SHIFT 16
+
+#define D3DCOMPILER_SHDR_SHADER_TYPE_CS 0x4353
+
+enum d3dcompiler_shader_type
+{
+    D3DCOMPILER_SHADER_TYPE_CS = 5,
+};
 
 struct d3dcompiler_shader_signature
 {
@@ -43,7 +69,6 @@ struct d3dcompiler_shader_signature
 struct d3dcompiler_shader_reflection_type
 {
     ID3D11ShaderReflectionType ID3D11ShaderReflectionType_iface;
-    ID3D10ShaderReflectionType ID3D10ShaderReflectionType_iface;
 
     uint32_t id;
     struct wine_rb_entry entry;
@@ -65,7 +90,6 @@ struct d3dcompiler_shader_reflection_type_member
 struct d3dcompiler_shader_reflection_variable
 {
     ID3D11ShaderReflectionVariable ID3D11ShaderReflectionVariable_iface;
-    ID3D10ShaderReflectionVariable ID3D10ShaderReflectionVariable_iface;
 
     struct d3dcompiler_shader_reflection_constant_buffer *constant_buffer;
     struct d3dcompiler_shader_reflection_type *type;
@@ -80,7 +104,6 @@ struct d3dcompiler_shader_reflection_variable
 struct d3dcompiler_shader_reflection_constant_buffer
 {
     ID3D11ShaderReflectionConstantBuffer ID3D11ShaderReflectionConstantBuffer_iface;
-    ID3D10ShaderReflectionConstantBuffer ID3D10ShaderReflectionConstantBuffer_iface;
 
     struct d3dcompiler_shader_reflection *reflection;
 
@@ -104,7 +127,6 @@ enum D3DCOMPILER_REFLECTION_VERSION
 struct d3dcompiler_shader_reflection
 {
     ID3D11ShaderReflection ID3D11ShaderReflection_iface;
-    ID3D10ShaderReflection ID3D10ShaderReflection_iface;
     LONG refcount;
 
     enum D3DCOMPILER_REFLECTION_VERSION interface_version;
@@ -144,6 +166,9 @@ struct d3dcompiler_shader_reflection
     D3D_TESSELLATOR_OUTPUT_PRIMITIVE hs_output_primitive;
     D3D_TESSELLATOR_PARTITIONING hs_partitioning;
     D3D_TESSELLATOR_DOMAIN tessellator_domain;
+    UINT thread_group_size_x;
+    UINT thread_group_size_y;
+    UINT thread_group_size_z;
 
     struct d3dcompiler_shader_signature *isgn;
     struct d3dcompiler_shader_signature *osgn;
@@ -160,25 +185,18 @@ static const struct ID3D11ShaderReflectionConstantBufferVtbl d3dcompiler_shader_
 static const struct ID3D11ShaderReflectionVariableVtbl d3dcompiler_shader_reflection_variable_vtbl;
 static const struct ID3D11ShaderReflectionTypeVtbl d3dcompiler_shader_reflection_type_vtbl;
 
-static const struct ID3D10ShaderReflectionConstantBufferVtbl d3d10_shader_reflection_constant_buffer_vtbl;
-static const struct ID3D10ShaderReflectionVariableVtbl d3d10_shader_reflection_variable_vtbl;
-static const struct ID3D10ShaderReflectionTypeVtbl d3d10_shader_reflection_type_vtbl;
-
 /* null objects - needed for invalid calls */
 static struct d3dcompiler_shader_reflection_constant_buffer null_constant_buffer =
 {
     {&d3dcompiler_shader_reflection_constant_buffer_vtbl},
-    {&d3d10_shader_reflection_constant_buffer_vtbl}
 };
 static struct d3dcompiler_shader_reflection_type null_type =
 {
     {&d3dcompiler_shader_reflection_type_vtbl},
-    {&d3d10_shader_reflection_type_vtbl}
 };
 static struct d3dcompiler_shader_reflection_variable null_variable =
 {
     {&d3dcompiler_shader_reflection_variable_vtbl},
-    {&d3d10_shader_reflection_variable_vtbl},
     &null_constant_buffer,
     &null_type
 };
@@ -425,6 +443,7 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetDesc(ID3D11Sha
     desc->EmitInstructionCount = reflection->emit_instruction_count;
     desc->GSOutputTopology = reflection->gs_output_topology;
     desc->GSMaxOutputVertexCount = reflection->gs_max_output_vertex_count;
+#if D3D_COMPILER_VERSION
     desc->InputPrimitive = reflection->input_primitive;
     desc->PatchConstantParameters = reflection->pcsg ? reflection->pcsg->element_count : 0;
     desc->cGSInstanceCount = 0;
@@ -435,6 +454,7 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetDesc(ID3D11Sha
     desc->cBarrierInstructions = 0;
     desc->cInterlockedInstructions = 0;
     desc->cTextureStoreInstructions = 0;
+#endif
 
     return S_OK;
 }
@@ -541,6 +561,7 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetOutputParamete
     return S_OK;
 }
 
+#if D3D_COMPILER_VERSION
 static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetPatchConstantParameterDesc(
         ID3D11ShaderReflection *iface, UINT index, D3D11_SIGNATURE_PARAMETER_DESC *desc)
 {
@@ -697,9 +718,21 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetMinFeatureLeve
 static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetThreadGroupSize(
         ID3D11ShaderReflection *iface, UINT *sizex, UINT *sizey, UINT *sizez)
 {
-    FIXME("iface %p, sizex %p, sizey %p, sizez %p stub!\n", iface, sizex, sizey, sizez);
+    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D11ShaderReflection(iface);
 
-    return 0;
+    TRACE("iface %p, sizex %p, sizey %p, sizez %p.\n", iface, sizex, sizey, sizez);
+
+    if (!sizex || !sizey || !sizez)
+    {
+        WARN("Invalid argument specified.\n");
+        return E_INVALIDARG;
+    }
+
+    *sizex = reflection->thread_group_size_x;
+    *sizey = reflection->thread_group_size_y;
+    *sizez = reflection->thread_group_size_z;
+
+    return *sizex * *sizey * *sizez;
 }
 
 static UINT64 STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetRequiresFlags(
@@ -709,6 +742,7 @@ static UINT64 STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetRequiresFlags(
 
     return 0;
 }
+#endif
 
 static const struct ID3D11ShaderReflectionVtbl d3dcompiler_shader_reflection_vtbl =
 {
@@ -723,6 +757,7 @@ static const struct ID3D11ShaderReflectionVtbl d3dcompiler_shader_reflection_vtb
     d3dcompiler_shader_reflection_GetResourceBindingDesc,
     d3dcompiler_shader_reflection_GetInputParameterDesc,
     d3dcompiler_shader_reflection_GetOutputParameterDesc,
+#if D3D_COMPILER_VERSION
     d3dcompiler_shader_reflection_GetPatchConstantParameterDesc,
     d3dcompiler_shader_reflection_GetVariableByName,
     d3dcompiler_shader_reflection_GetResourceBindingDescByName,
@@ -736,6 +771,7 @@ static const struct ID3D11ShaderReflectionVtbl d3dcompiler_shader_reflection_vtb
     d3dcompiler_shader_reflection_GetMinFeatureLevel,
     d3dcompiler_shader_reflection_GetThreadGroupSize,
     d3dcompiler_shader_reflection_GetRequiresFlags,
+#endif
 };
 
 /* ID3D11ShaderReflectionConstantBuffer methods */
@@ -859,11 +895,13 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_variable_GetDesc(
     desc->uFlags = This->flags;
     desc->DefaultValue = This->default_value;
 
+#if D3D_COMPILER_VERSION
     /* TODO test and set proper values for texture. */
     desc->StartTexture = 0xffffffff;
     desc->TextureSize = 0;
     desc->StartSampler = 0xffffffff;
     desc->SamplerSize = 0;
+#endif
 
     return S_OK;
 }
@@ -878,6 +916,7 @@ static ID3D11ShaderReflectionType * STDMETHODCALLTYPE d3dcompiler_shader_reflect
     return &This->type->ID3D11ShaderReflectionType_iface;
 }
 
+#if D3D_COMPILER_VERSION
 static ID3D11ShaderReflectionConstantBuffer * STDMETHODCALLTYPE d3dcompiler_shader_reflection_variable_GetBuffer(
         ID3D11ShaderReflectionVariable *iface)
 {
@@ -895,14 +934,17 @@ static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_variable_GetInterfac
 
     return 0;
 }
+#endif
 
 static const struct ID3D11ShaderReflectionVariableVtbl d3dcompiler_shader_reflection_variable_vtbl =
 {
     /* ID3D11ShaderReflectionVariable methods */
     d3dcompiler_shader_reflection_variable_GetDesc,
     d3dcompiler_shader_reflection_variable_GetType,
+#if D3D_COMPILER_VERSION
     d3dcompiler_shader_reflection_variable_GetBuffer,
     d3dcompiler_shader_reflection_variable_GetInterfaceSlot,
+#endif
 };
 
 /* ID3D11ShaderReflectionType methods */
@@ -1004,6 +1046,7 @@ static const char * STDMETHODCALLTYPE d3dcompiler_shader_reflection_type_GetMemb
     return This->members[index].name;
 }
 
+#if D3D_COMPILER_VERSION
 static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_type_IsEqual(
         ID3D11ShaderReflectionType *iface, ID3D11ShaderReflectionType *type)
 {
@@ -1070,6 +1113,7 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_type_ImplementsIn
 
     return E_NOTIMPL;
 }
+#endif
 
 static const struct ID3D11ShaderReflectionTypeVtbl d3dcompiler_shader_reflection_type_vtbl =
 {
@@ -1078,6 +1122,7 @@ static const struct ID3D11ShaderReflectionTypeVtbl d3dcompiler_shader_reflection
     d3dcompiler_shader_reflection_type_GetMemberTypeByIndex,
     d3dcompiler_shader_reflection_type_GetMemberTypeByName,
     d3dcompiler_shader_reflection_type_GetMemberTypeName,
+#if D3D_COMPILER_VERSION
     d3dcompiler_shader_reflection_type_IsEqual,
     d3dcompiler_shader_reflection_type_GetSubType,
     d3dcompiler_shader_reflection_type_GetBaseClass,
@@ -1085,6 +1130,7 @@ static const struct ID3D11ShaderReflectionTypeVtbl d3dcompiler_shader_reflection
     d3dcompiler_shader_reflection_type_GetInterfaceByIndex,
     d3dcompiler_shader_reflection_type_IsOfType,
     d3dcompiler_shader_reflection_type_ImplementsInterface,
+#endif
 };
 
 static HRESULT d3dcompiler_parse_stat(struct d3dcompiler_shader_reflection *r, const char *data, size_t data_size)
@@ -1290,6 +1336,7 @@ static HRESULT d3dcompiler_parse_type(struct d3dcompiler_shader_reflection_type 
         }
     }
 
+#if D3D_COMPILER_VERSION
     if ((type->reflection->target & D3DCOMPILER_SHADER_TARGET_VERSION_MASK) >= 0x500)
     {
         offset = read_u32(&ptr);
@@ -1302,6 +1349,7 @@ static HRESULT d3dcompiler_parse_type(struct d3dcompiler_shader_reflection_type 
         desc->Name = type->name;
         TRACE("Type name: %s.\n", debugstr_a(type->name));
     }
+#endif
 
     type->members = members;
 
@@ -1334,7 +1382,6 @@ static struct d3dcompiler_shader_reflection_type *get_reflection_type(struct d3d
         return NULL;
 
     type->ID3D11ShaderReflectionType_iface.lpVtbl = &d3dcompiler_shader_reflection_type_vtbl;
-    type->ID3D10ShaderReflectionType_iface.lpVtbl = &d3d10_shader_reflection_type_vtbl;
     type->id = offset;
     type->reflection = reflection;
 
@@ -1376,7 +1423,6 @@ static HRESULT d3dcompiler_parse_variables(struct d3dcompiler_shader_reflection_
         uint32_t offset;
 
         v->ID3D11ShaderReflectionVariable_iface.lpVtbl = &d3dcompiler_shader_reflection_variable_vtbl;
-        v->ID3D10ShaderReflectionVariable_iface.lpVtbl = &d3d10_shader_reflection_variable_vtbl;
         v->constant_buffer = cb;
 
         offset = read_u32(&ptr);
@@ -1443,6 +1489,9 @@ static HRESULT d3dcompiler_parse_rdef(struct d3dcompiler_shader_reflection *r, c
     size_t size = data_size >> 2;
     uint32_t target_version;
     const char *ptr = data;
+#if D3D_COMPILER_VERSION < 47
+    uint32_t shader_type;
+#endif
     HRESULT hr;
 
     TRACE("Size %Iu.\n", size);
@@ -1463,9 +1512,11 @@ static HRESULT d3dcompiler_parse_rdef(struct d3dcompiler_shader_reflection *r, c
     TRACE("Target: %#x.\n", r->target);
 
     target_version = r->target & D3DCOMPILER_SHADER_TARGET_VERSION_MASK;
-
 #if D3D_COMPILER_VERSION < 47
-    if (target_version >= 0x501)
+    shader_type = (r->target & D3DCOMPILER_SHADER_TARGET_SHADERTYPE_MASK)
+            >> D3DCOMPILER_SHADER_TARGET_SHADERTYPE_SHIFT;
+    if ((target_version >= 0x501 && shader_type != D3DCOMPILER_SHDR_SHADER_TYPE_CS)
+            || (!D3D_COMPILER_VERSION && shader_type == D3DCOMPILER_SHDR_SHADER_TYPE_CS))
     {
         WARN("Target version %#x is not supported in d3dcompiler %u.\n", target_version, D3D_COMPILER_VERSION);
         return E_INVALIDARG;
@@ -1575,7 +1626,6 @@ static HRESULT d3dcompiler_parse_rdef(struct d3dcompiler_shader_reflection *r, c
             struct d3dcompiler_shader_reflection_constant_buffer *cb = &constant_buffers[i];
 
             cb->ID3D11ShaderReflectionConstantBuffer_iface.lpVtbl = &d3dcompiler_shader_reflection_constant_buffer_vtbl;
-            cb->ID3D10ShaderReflectionConstantBuffer_iface.lpVtbl = &d3d10_shader_reflection_constant_buffer_vtbl;
             cb->reflection = r;
 
             offset = read_u32(&ptr);
@@ -1692,6 +1742,7 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
         /* FIXME */
         d[i].MinPrecision = D3D_MIN_PRECISION_DEFAULT;
 #endif
+#if D3D_COMPILER_VERSION
         if (element_size == D3DCOMPILER_SIGNATURE_ELEMENT_SIZE7)
         {
             d[i].Stream = read_u32(&ptr);
@@ -1700,6 +1751,7 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
         {
             d[i].Stream = 0;
         }
+#endif
 
         name_offset = read_u32(&ptr);
         d[i].SemanticName = string_data + (name_offset - string_data_offset);
@@ -1721,11 +1773,6 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
             d[i].SystemValueType = D3D_NAME_DEPTH_LESS_EQUAL;
         else if (!stricmp(d[i].SemanticName, "sv_target"))
             d[i].SystemValueType = D3D_NAME_TARGET;
-
-        TRACE("semantic: %s, semantic idx: %u, sysval_semantic %#x, "
-                "type %u, register idx: %u, use_mask %#x, input_mask %#x, stream %u\n",
-                debugstr_a(d[i].SemanticName), d[i].SemanticIndex, d[i].SystemValueType,
-                d[i].ComponentType, d[i].Register, d[i].Mask, d[i].ReadWriteMask, d[i].Stream);
     }
 
     s->elements = d;
@@ -1735,15 +1782,79 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
     return S_OK;
 }
 
+#define SM4_OPCODE_MASK                 0xff
+#define SM4_INSTRUCTION_LENGTH_SHIFT    24
+#define SM4_INSTRUCTION_LENGTH_MASK     (0x1fu << SM4_INSTRUCTION_LENGTH_SHIFT)
+
+enum sm4_opcode
+{
+    SM5_OP_DCL_THREAD_GROUP                 = 0x9b,
+};
+
 static HRESULT d3dcompiler_parse_shdr(struct d3dcompiler_shader_reflection *r, const char *data, size_t data_size)
 {
+    uint32_t opcode_token, opcode;
+    uint32_t size, shader_type;
     const char *ptr = data;
+    const uint32_t *u_ptr;
+    unsigned int len;
 
     r->version = read_u32(&ptr);
     TRACE("Shader version: %u\n", r->version);
 
-    /* todo: Check if anything else is needed from the shdr or shex blob. */
+    shader_type = (r->version & D3DCOMPILER_SHADER_TARGET_SHADERTYPE_MASK)
+            >> D3DCOMPILER_SHADER_TARGET_SHADERTYPE_SHIFT;
 
+    if (shader_type != D3DCOMPILER_SHADER_TYPE_CS)
+    {
+        /* TODO: Check if anything else is needed from the SHDR or SHEX blob. */
+        return S_OK;
+    }
+
+    size = read_u32(&ptr);
+    TRACE("size %u.\n", size);
+    if (size * sizeof(uint32_t) != data_size || size < 2)
+    {
+        WARN("Invalid size %u.\n", size);
+        return E_FAIL;
+    }
+    size -= 2;
+    u_ptr = (uint32_t *)ptr;
+    while (size)
+    {
+        opcode_token = *u_ptr;
+        opcode = opcode_token & SM4_OPCODE_MASK;
+        len = (opcode_token & SM4_INSTRUCTION_LENGTH_MASK) >> SM4_INSTRUCTION_LENGTH_SHIFT;
+        if (!len)
+        {
+            if (size < 2)
+            {
+                WARN("End of byte-code, failed to read length token.\n");
+                return E_FAIL;
+            }
+            len = u_ptr[1];
+        }
+        if (!len || size < len)
+        {
+            WARN("Invalid instruction length %u, size %u.\n", len, size);
+            return E_FAIL;
+        }
+        if (opcode == SM5_OP_DCL_THREAD_GROUP)
+        {
+            if (len != 4)
+            {
+                WARN("Invalid dcl_thread_group opcode length %u.\n", len);
+                return E_FAIL;
+            }
+            r->thread_group_size_x = u_ptr[1];
+            r->thread_group_size_y = u_ptr[2];
+            r->thread_group_size_z = u_ptr[3];
+            TRACE("Found dcl_thread_group %u, %u, %u.\n",
+                    r->thread_group_size_x, r->thread_group_size_y, r->thread_group_size_z);
+        }
+        size -= len;
+        u_ptr += len;
+    }
     return S_OK;
 }
 
@@ -1868,453 +1979,6 @@ err_out:
 
 /* d3d10 reflection methods. */
 #if !D3D_COMPILER_VERSION
-static inline struct d3dcompiler_shader_reflection *impl_from_ID3D10ShaderReflection(ID3D10ShaderReflection *iface)
-{
-    return CONTAINING_RECORD(iface, struct d3dcompiler_shader_reflection, ID3D10ShaderReflection_iface);
-}
-
-static HRESULT STDMETHODCALLTYPE d3d10_shader_reflection_QueryInterface(ID3D10ShaderReflection *iface,
-        REFIID riid, void **object)
-{
-    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
-
-    if (IsEqualGUID(riid, &IID_ID3D10ShaderReflection) || IsEqualGUID(riid, &IID_IUnknown))
-    {
-        IUnknown_AddRef(iface);
-        *object = iface;
-        return S_OK;
-    }
-
-    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
-
-    *object = NULL;
-    return E_NOINTERFACE;
-}
-
-static ULONG STDMETHODCALLTYPE d3d10_shader_reflection_AddRef(ID3D10ShaderReflection *iface)
-{
-    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D10ShaderReflection(iface);
-    ULONG refcount = InterlockedIncrement(&reflection->refcount);
-
-    TRACE("%p increasing refcount to %lu.\n", reflection, refcount);
-
-    return refcount;
-}
-
-static ULONG STDMETHODCALLTYPE d3d10_shader_reflection_Release(ID3D10ShaderReflection *iface)
-{
-    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D10ShaderReflection(iface);
-    ULONG refcount = InterlockedDecrement(&reflection->refcount);
-
-    TRACE("%p decreasing refcount to %lu.\n", reflection, refcount);
-
-    if (!refcount)
-        heap_free(reflection);
-
-    return refcount;
-}
-
-static HRESULT STDMETHODCALLTYPE d3d10_shader_reflection_GetDesc(ID3D10ShaderReflection *iface,
-        D3D10_SHADER_DESC *desc)
-{
-    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D10ShaderReflection(iface);
-
-    TRACE("iface %p, desc %p.\n", iface, desc);
-
-    if (!desc)
-    {
-        WARN("Invalid argument specified.\n");
-        return E_FAIL;
-    }
-
-    desc->Version = reflection->version;
-    desc->Creator = reflection->creator;
-    desc->Flags = reflection->flags;
-    desc->ConstantBuffers = reflection->constant_buffer_count;
-    desc->BoundResources = reflection->bound_resource_count;
-    desc->InputParameters = reflection->isgn ? reflection->isgn->element_count : 0;
-    desc->OutputParameters = reflection->osgn ? reflection->osgn->element_count : 0;
-    desc->InstructionCount = reflection->instruction_count;
-    desc->TempRegisterCount = reflection->temp_register_count;
-    desc->TempArrayCount = reflection->temp_array_count;
-    desc->DefCount = reflection->def_count;
-    desc->DclCount = reflection->dcl_count;
-    desc->TextureNormalInstructions = reflection->texture_normal_instructions;
-    desc->TextureLoadInstructions = reflection->texture_load_instructions;
-    desc->TextureCompInstructions = reflection->texture_comp_instructions;
-    desc->TextureBiasInstructions = reflection->texture_bias_instructions;
-    desc->TextureGradientInstructions = reflection->texture_gradient_instructions;
-    desc->FloatInstructionCount = reflection->float_instruction_count;
-    desc->IntInstructionCount = reflection->int_instruction_count;
-    desc->UintInstructionCount = reflection->uint_instruction_count;
-    desc->StaticFlowControlCount = reflection->static_flow_control_count;
-    desc->DynamicFlowControlCount = reflection->dynamic_flow_control_count;
-    desc->MacroInstructionCount = reflection->macro_instruction_count;
-    desc->ArrayInstructionCount = reflection->array_instruction_count;
-    desc->CutInstructionCount = reflection->cut_instruction_count;
-    desc->EmitInstructionCount = reflection->emit_instruction_count;
-    desc->GSOutputTopology = reflection->gs_output_topology;
-    desc->GSMaxOutputVertexCount = reflection->gs_max_output_vertex_count;
-
-    return S_OK;
-}
-
-static struct ID3D10ShaderReflectionConstantBuffer * STDMETHODCALLTYPE d3d10_shader_reflection_GetConstantBufferByIndex(
-        ID3D10ShaderReflection *iface, UINT index)
-{
-    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D10ShaderReflection(iface);
-
-    TRACE("iface %p, index %u.\n", iface, index);
-
-    if (index >= reflection->constant_buffer_count)
-    {
-        WARN("Invalid argument specified.\n");
-        return &null_constant_buffer.ID3D10ShaderReflectionConstantBuffer_iface;
-    }
-
-    return &reflection->constant_buffers[index].ID3D10ShaderReflectionConstantBuffer_iface;
-}
-
-static struct ID3D10ShaderReflectionConstantBuffer * STDMETHODCALLTYPE d3d10_shader_reflection_GetConstantBufferByName(
-        ID3D10ShaderReflection *iface, const char *name)
-{
-    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D10ShaderReflection(iface);
-    unsigned int i;
-
-    TRACE("iface %p, name %s.\n", iface, debugstr_a(name));
-
-    if (!name)
-    {
-        WARN("Invalid argument specified.\n");
-        return &null_constant_buffer.ID3D10ShaderReflectionConstantBuffer_iface;
-    }
-
-    for (i = 0; i < reflection->constant_buffer_count; ++i)
-    {
-        struct d3dcompiler_shader_reflection_constant_buffer *d = &reflection->constant_buffers[i];
-
-        if (!strcmp(d->name, name))
-        {
-            TRACE("Returning ID3D10ShaderReflectionConstantBuffer %p.\n", d);
-            return &d->ID3D10ShaderReflectionConstantBuffer_iface;
-        }
-    }
-
-    WARN("Invalid name specified.\n");
-
-    return &null_constant_buffer.ID3D10ShaderReflectionConstantBuffer_iface;
-}
-
-static HRESULT STDMETHODCALLTYPE d3d10_shader_reflection_GetResourceBindingDesc(ID3D10ShaderReflection *iface,
-        UINT index, D3D10_SHADER_INPUT_BIND_DESC *desc)
-{
-    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D10ShaderReflection(iface);
-
-    TRACE("iface %p, index %u, desc %p.\n", iface, index, desc);
-
-    if (!desc || index >= reflection->bound_resource_count)
-    {
-        WARN("Invalid argument specified.\n");
-        return E_INVALIDARG;
-    }
-
-    memcpy(desc, &reflection->bound_resources[index], sizeof(*desc));
-
-    return S_OK;
-}
-
-static HRESULT STDMETHODCALLTYPE d3d10_shader_reflection_GetInputParameterDesc(ID3D10ShaderReflection *iface,
-        UINT index, D3D10_SIGNATURE_PARAMETER_DESC *desc)
-{
-    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D10ShaderReflection(iface);
-
-    TRACE("iface %p, index %u, desc %p.\n", iface, index, desc);
-
-    if (!desc || !reflection->isgn || index >= reflection->isgn->element_count)
-    {
-        WARN("Invalid argument specified.\n");
-        return E_INVALIDARG;
-    }
-
-    memcpy(desc, &reflection->isgn->elements[index], sizeof(*desc));
-
-    return S_OK;
-}
-
-static HRESULT STDMETHODCALLTYPE d3d10_shader_reflection_GetOutputParameterDesc(ID3D10ShaderReflection *iface,
-        UINT index, D3D10_SIGNATURE_PARAMETER_DESC *desc)
-{
-    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D10ShaderReflection(iface);
-
-    TRACE("iface %p, index %u, desc %p.\n", iface, index, desc);
-
-    if (!desc || !reflection->osgn || index >= reflection->osgn->element_count)
-    {
-        WARN("Invalid argument specified.\n");
-        return E_INVALIDARG;
-    }
-
-    memcpy(desc, &reflection->osgn->elements[index], sizeof(*desc));
-
-    return S_OK;
-}
-
-static const struct ID3D10ShaderReflectionVtbl d3d10_shader_reflection_vtbl =
-{
-    d3d10_shader_reflection_QueryInterface,
-    d3d10_shader_reflection_AddRef,
-    d3d10_shader_reflection_Release,
-    d3d10_shader_reflection_GetDesc,
-    d3d10_shader_reflection_GetConstantBufferByIndex,
-    d3d10_shader_reflection_GetConstantBufferByName,
-    d3d10_shader_reflection_GetResourceBindingDesc,
-    d3d10_shader_reflection_GetInputParameterDesc,
-    d3d10_shader_reflection_GetOutputParameterDesc,
-};
-
-static inline struct d3dcompiler_shader_reflection_constant_buffer *impl_from_ID3D10ShaderReflectionConstantBuffer(
-        ID3D10ShaderReflectionConstantBuffer *iface)
-{
-    return CONTAINING_RECORD(iface, struct d3dcompiler_shader_reflection_constant_buffer,
-            ID3D10ShaderReflectionConstantBuffer_iface);
-}
-
-static HRESULT STDMETHODCALLTYPE d3d10_shader_reflection_constant_buffer_GetDesc(
-        ID3D10ShaderReflectionConstantBuffer *iface, D3D10_SHADER_BUFFER_DESC *desc)
-{
-    struct d3dcompiler_shader_reflection_constant_buffer *cb = impl_from_ID3D10ShaderReflectionConstantBuffer(iface);
-
-    TRACE("iface %p, desc %p.\n", iface, desc);
-
-    if (cb == &null_constant_buffer)
-    {
-        WARN("Null constant buffer specified.\n");
-        return E_FAIL;
-    }
-
-    if (!desc)
-    {
-        WARN("Invalid argument specified.\n");
-        return E_FAIL;
-    }
-
-    desc->Name = cb->name;
-    desc->Type = cb->type;
-    desc->Variables = cb->variable_count;
-    desc->Size = cb->size;
-    desc->uFlags = cb->flags;
-
-    return S_OK;
-}
-
-static ID3D10ShaderReflectionVariable * STDMETHODCALLTYPE d3d10_shader_reflection_constant_buffer_GetVariableByIndex(
-        ID3D10ShaderReflectionConstantBuffer *iface, UINT index)
-{
-    struct d3dcompiler_shader_reflection_constant_buffer *cb = impl_from_ID3D10ShaderReflectionConstantBuffer(iface);
-
-    TRACE("iface %p, index %u.\n", iface, index);
-
-    if (index >= cb->variable_count)
-    {
-        WARN("Invalid index specified.\n");
-        return &null_variable.ID3D10ShaderReflectionVariable_iface;
-    }
-
-    return &cb->variables[index].ID3D10ShaderReflectionVariable_iface;
-}
-
-static ID3D10ShaderReflectionVariable * STDMETHODCALLTYPE d3d10_shader_reflection_constant_buffer_GetVariableByName(
-        ID3D10ShaderReflectionConstantBuffer *iface, const char *name)
-{
-    struct d3dcompiler_shader_reflection_constant_buffer *cb = impl_from_ID3D10ShaderReflectionConstantBuffer(iface);
-    unsigned int i;
-
-    TRACE("iface %p, name %s.\n", iface, debugstr_a(name));
-
-    if (!name)
-    {
-        WARN("Invalid argument specified.\n");
-        return &null_variable.ID3D10ShaderReflectionVariable_iface;
-    }
-
-    for (i = 0; i < cb->variable_count; ++i)
-    {
-        struct d3dcompiler_shader_reflection_variable *v = &cb->variables[i];
-
-        if (!strcmp(v->name, name))
-        {
-            TRACE("Returning ID3D10ShaderReflectionVariable %p.\n", v);
-            return &v->ID3D10ShaderReflectionVariable_iface;
-        }
-    }
-
-    WARN("Invalid name specified.\n");
-
-    return &null_variable.ID3D10ShaderReflectionVariable_iface;
-}
-
-static const struct ID3D10ShaderReflectionConstantBufferVtbl d3d10_shader_reflection_constant_buffer_vtbl =
-{
-    d3d10_shader_reflection_constant_buffer_GetDesc,
-    d3d10_shader_reflection_constant_buffer_GetVariableByIndex,
-    d3d10_shader_reflection_constant_buffer_GetVariableByName,
-};
-
-static inline struct d3dcompiler_shader_reflection_variable *impl_from_ID3D10ShaderReflectionVariable(ID3D10ShaderReflectionVariable *iface)
-{
-    return CONTAINING_RECORD(iface, struct d3dcompiler_shader_reflection_variable, ID3D10ShaderReflectionVariable_iface);
-}
-
-static HRESULT STDMETHODCALLTYPE d3d10_shader_reflection_variable_GetDesc(ID3D10ShaderReflectionVariable *iface,
-        D3D10_SHADER_VARIABLE_DESC *desc)
-{
-    struct d3dcompiler_shader_reflection_variable *var = impl_from_ID3D10ShaderReflectionVariable(iface);
-
-    TRACE("iface %p, desc %p.\n", iface, desc);
-
-    if (var == &null_variable)
-    {
-        WARN("Null variable specified.\n");
-        return E_FAIL;
-    }
-
-    if (!desc)
-    {
-        WARN("Invalid argument specified.\n");
-        return E_FAIL;
-    }
-
-    desc->Name = var->name;
-    desc->StartOffset = var->start_offset;
-    desc->Size = var->size;
-    desc->uFlags = var->flags;
-    desc->DefaultValue = var->default_value;
-
-    return S_OK;
-}
-
-static ID3D10ShaderReflectionType * STDMETHODCALLTYPE d3d10_shader_reflection_variable_GetType(
-        ID3D10ShaderReflectionVariable *iface)
-{
-    struct d3dcompiler_shader_reflection_variable *var = impl_from_ID3D10ShaderReflectionVariable(iface);
-
-    TRACE("iface %p.\n", iface);
-
-    return &var->type->ID3D10ShaderReflectionType_iface;
-}
-
-static const struct ID3D10ShaderReflectionVariableVtbl d3d10_shader_reflection_variable_vtbl =
-{
-    d3d10_shader_reflection_variable_GetDesc,
-    d3d10_shader_reflection_variable_GetType,
-};
-
-static inline struct d3dcompiler_shader_reflection_type *impl_from_ID3D10ShaderReflectionType(
-        ID3D10ShaderReflectionType *iface)
-{
-    return CONTAINING_RECORD(iface, struct d3dcompiler_shader_reflection_type, ID3D10ShaderReflectionType_iface);
-}
-
-static HRESULT STDMETHODCALLTYPE d3d10_shader_reflection_type_GetDesc(ID3D10ShaderReflectionType *iface,
-        D3D10_SHADER_TYPE_DESC *desc)
-{
-    struct d3dcompiler_shader_reflection_type *type = impl_from_ID3D10ShaderReflectionType(iface);
-
-    TRACE("iface %p, desc %p.\n", iface, desc);
-
-    if (type == &null_type)
-    {
-        WARN("Null type specified.\n");
-        return E_FAIL;
-    }
-
-    if (!desc)
-    {
-        WARN("Invalid argument specified.\n");
-        return E_FAIL;
-    }
-
-    memcpy(desc, &type->desc, sizeof(*desc));
-
-    return S_OK;
-}
-
-static ID3D10ShaderReflectionType * STDMETHODCALLTYPE d3d10_shader_reflection_type_GetMemberTypeByIndex(
-        ID3D10ShaderReflectionType *iface, UINT index)
-{
-    struct d3dcompiler_shader_reflection_type *type = impl_from_ID3D10ShaderReflectionType(iface);
-
-    TRACE("iface %p, index %u.\n", iface, index);
-
-    if (index >= type->desc.Members)
-    {
-        WARN("Invalid index specified.\n");
-        return &null_type.ID3D10ShaderReflectionType_iface;
-    }
-
-    return &type->members[index].type->ID3D10ShaderReflectionType_iface;
-}
-
-static ID3D10ShaderReflectionType * STDMETHODCALLTYPE d3d10_shader_reflection_type_GetMemberTypeByName(
-        ID3D10ShaderReflectionType *iface, const char *name)
-{
-    struct d3dcompiler_shader_reflection_type *type = impl_from_ID3D10ShaderReflectionType(iface);
-    unsigned int i;
-
-    TRACE("iface %p, name %s.\n", iface, debugstr_a(name));
-
-    if (!name)
-    {
-        WARN("Invalid argument specified.\n");
-        return &null_type.ID3D10ShaderReflectionType_iface;
-    }
-
-    for (i = 0; i < type->desc.Members; ++i)
-    {
-        struct d3dcompiler_shader_reflection_type_member *member = &type->members[i];
-
-        if (!strcmp(member->name, name))
-        {
-            TRACE("Returning ID3D10ShaderReflectionType %p.\n", member->type);
-            return &member->type->ID3D10ShaderReflectionType_iface;
-        }
-    }
-
-    WARN("Invalid name specified.\n");
-
-    return &null_type.ID3D10ShaderReflectionType_iface;
-}
-
-static const char * STDMETHODCALLTYPE d3d10_shader_reflection_type_GetMemberTypeName(
-        ID3D10ShaderReflectionType *iface, UINT index)
-{
-    struct d3dcompiler_shader_reflection_type *type = impl_from_ID3D10ShaderReflectionType(iface);
-
-    TRACE("iface %p, index %u.\n", iface, index);
-
-    if (type == &null_type)
-    {
-        WARN("Null type specified.\n");
-        return "$Invalid";
-    }
-
-    if (index >= type->desc.Members)
-    {
-        WARN("Invalid index specified.\n");
-        return NULL;
-    }
-
-    return type->members[index].name;
-}
-
-static const struct ID3D10ShaderReflectionTypeVtbl d3d10_shader_reflection_type_vtbl =
-{
-    d3d10_shader_reflection_type_GetDesc,
-    d3d10_shader_reflection_type_GetMemberTypeByIndex,
-    d3d10_shader_reflection_type_GetMemberTypeByName,
-    d3d10_shader_reflection_type_GetMemberTypeName,
-};
-
 HRESULT WINAPI D3D10ReflectShader(const void *data, SIZE_T data_size, ID3D10ShaderReflection **reflector)
 {
     struct d3dcompiler_shader_reflection *object;
@@ -2328,7 +1992,7 @@ HRESULT WINAPI D3D10ReflectShader(const void *data, SIZE_T data_size, ID3D10Shad
         return E_OUTOFMEMORY;
     }
 
-    object->ID3D10ShaderReflection_iface.lpVtbl = &d3d10_shader_reflection_vtbl;
+    object->ID3D11ShaderReflection_iface.lpVtbl = &d3dcompiler_shader_reflection_vtbl;
     object->interface_version = D3DCOMPILER_REFLECTION_VERSION_D3D10;
     object->refcount = 1;
 
@@ -2340,14 +2004,13 @@ HRESULT WINAPI D3D10ReflectShader(const void *data, SIZE_T data_size, ID3D10Shad
         return hr;
     }
 
-    *reflector = &object->ID3D10ShaderReflection_iface;
+    *reflector = (ID3D10ShaderReflection *)&object->ID3D11ShaderReflection_iface;
 
     TRACE("Created ID3D10ShaderReflection %p.\n", object);
 
     return S_OK;
 }
-#endif
-
+#else
 HRESULT WINAPI D3DReflect(const void *data, SIZE_T data_size, REFIID riid, void **reflector)
 {
     struct d3dcompiler_shader_reflection *object;
@@ -2401,8 +2064,8 @@ HRESULT WINAPI D3DReflect(const void *data, SIZE_T data_size, REFIID riid, void 
     }
 
     *reflector = object;
-
     TRACE("Created ID3D11ShaderReflection %p\n", object);
 
     return S_OK;
 }
+#endif

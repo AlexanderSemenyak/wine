@@ -45,6 +45,34 @@
 #define WIDL_using_Windows_Devices_Haptics
 #define WIDL_using_Windows_Gaming_Input
 #include "windows.gaming.input.h"
+#undef Size
+
+#define MAKE_FUNC(f) static typeof(f) *p ## f
+MAKE_FUNC( RoGetActivationFactory );
+MAKE_FUNC( RoInitialize );
+MAKE_FUNC( WindowsCreateString );
+MAKE_FUNC( WindowsDeleteString );
+MAKE_FUNC( WindowsGetStringRawBuffer );
+#undef MAKE_FUNC
+
+static BOOL load_combase_functions(void)
+{
+    HMODULE combase = GetModuleHandleW( L"combase.dll" );
+
+#define LOAD_FUNC(m, f) if (!(p ## f = (void *)GetProcAddress( m, #f ))) goto failed;
+    LOAD_FUNC( combase, RoGetActivationFactory );
+    LOAD_FUNC( combase, RoInitialize );
+    LOAD_FUNC( combase, WindowsCreateString );
+    LOAD_FUNC( combase, WindowsDeleteString );
+    LOAD_FUNC( combase, WindowsGetStringRawBuffer );
+#undef LOAD_FUNC
+
+    return TRUE;
+
+failed:
+    win_skip("Failed to load combase.dll functions, skipping tests\n");
+    return FALSE;
+}
 
 struct check_objects_todos
 {
@@ -371,9 +399,11 @@ static void test_simple_joystick( DWORD version )
 #undef REPORT_ID_OR_USAGE_PAGE
 #include "pop_hid_macros.h"
 
-    static const HIDP_CAPS hid_caps =
+    struct hid_device_desc desc =
     {
-        .InputReportByteLength = 9,
+        .use_report_id = TRUE,
+        .caps = { .InputReportByteLength = 9 },
+        .attributes = default_attributes,
     };
     const DIDEVCAPS expect_caps =
     {
@@ -467,8 +497,8 @@ static void test_simple_joystick( DWORD version )
         .guidProduct = expect_guid_product,
         .dwDevType = version >= 0x800 ? DIDEVTYPE_HID | (DI8DEVTYPEJOYSTICK_LIMITED << 8) | DI8DEVTYPE_JOYSTICK
                                       : DIDEVTYPE_HID | (DIDEVTYPEJOYSTICK_RUDDER << 8) | DIDEVTYPE_JOYSTICK,
-        .tszInstanceName = L"Wine test root driver",
-        .tszProductName = L"Wine test root driver",
+        .tszInstanceName = L"Wine Test",
+        .tszProductName = L"Wine Test",
         .guidFFDriver = GUID_NULL,
         .wUsagePage = HID_USAGE_PAGE_GENERIC,
         .wUsage = HID_USAGE_GENERIC_JOYSTICK,
@@ -748,7 +778,6 @@ static void test_simple_joystick( DWORD version )
         },
     };
     DIOBJECTDATAFORMAT objdataformat[32] = {{0}};
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
     DIDEVICEOBJECTDATA objdata[32] = {{0}};
     DIDEVICEOBJECTINSTANCEW objinst = {0};
     DIDEVICEOBJECTINSTANCEW expect_obj;
@@ -764,18 +793,18 @@ static void test_simple_joystick( DWORD version )
     char buffer[1024];
     DIJOYSTATE2 state;
     HRESULT hr;
-    WCHAR *tmp;
     GUID guid;
     HWND hwnd;
 
     winetest_push_context( "%#lx", version );
 
-    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-    SetCurrentDirectoryW( tempdir );
-
     cleanup_registry_keys();
-    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 )) goto done;
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+
+    if (!hid_device_start( &desc )) goto done;
     if (FAILED(hr = dinput_test_create_device( version, &devinst, &device ))) goto done;
 
     check_dinput_devices( version, &devinst );
@@ -827,9 +856,7 @@ static void test_simple_joystick( DWORD version )
     check_member_guid( devinst, expect_devinst, guidProduct );
     todo_wine_if( version < 0x0800 )
     check_member( devinst, expect_devinst, "%#lx", dwDevType );
-    todo_wine
     check_member_wstr( devinst, expect_devinst, tszInstanceName );
-    todo_wine
     check_member_wstr( devinst, expect_devinst, tszProductName );
 
     memset( &devinst, 0, sizeof(devinst) );
@@ -842,9 +869,7 @@ static void test_simple_joystick( DWORD version )
     check_member_guid( devinst, expect_devinst, guidProduct );
     todo_wine_if( version < 0x0800 )
     check_member( devinst, expect_devinst, "%#lx", dwDevType );
-    todo_wine
     check_member_wstr( devinst, expect_devinst, tszInstanceName );
-    todo_wine
     check_member_wstr( devinst, expect_devinst, tszProductName );
     check_member_guid( devinst, expect_devinst, guidFFDriver );
     check_member( devinst, expect_devinst, "%04x", wUsagePage );
@@ -901,22 +926,16 @@ static void test_simple_joystick( DWORD version )
     todo_wine
     ok( !wcsncmp( prop_guid_path.wszPath, expect_path, wcslen( expect_path ) ), "got path %s\n",
         debugstr_w(prop_guid_path.wszPath) );
-    if (!(tmp = wcsrchr( prop_guid_path.wszPath, '&' )))
-        todo_wine ok( 0, "got path %s\n", debugstr_w(prop_guid_path.wszPath) );
-    else
-    {
-        ok( !wcscmp( wcsrchr( prop_guid_path.wszPath, '&' ), expect_path_end ), "got path %s\n",
-            debugstr_w(prop_guid_path.wszPath) );
-    }
+    todo_wine
+    ok( !wcscmp( wcsrchr( prop_guid_path.wszPath, '&' ), expect_path_end ), "got path %s\n",
+        debugstr_w(prop_guid_path.wszPath) );
 
     hr = IDirectInputDevice8_GetProperty( device, DIPROP_INSTANCENAME, &prop_string.diph );
     ok( hr == DI_OK, "GetProperty DIPROP_INSTANCENAME returned %#lx\n", hr );
-    todo_wine
     ok( !wcscmp( prop_string.wsz, expect_devinst.tszInstanceName ), "got instance %s\n",
         debugstr_w(prop_string.wsz) );
     hr = IDirectInputDevice8_GetProperty( device, DIPROP_PRODUCTNAME, &prop_string.diph );
     ok( hr == DI_OK, "GetProperty DIPROP_PRODUCTNAME returned %#lx\n", hr );
-    todo_wine
     ok( !wcscmp( prop_string.wsz, expect_devinst.tszProductName ), "got product %s\n",
         debugstr_w(prop_string.wsz) );
     hr = IDirectInputDevice8_GetProperty( device, DIPROP_TYPENAME, &prop_string.diph );
@@ -1703,7 +1722,6 @@ static void test_simple_joystick( DWORD version )
     ok( hr == DI_OK, "SetProperty DIPROP_PRODUCTNAME returned %#lx\n", hr );
     hr = IDirectInputDevice8_GetProperty( device, DIPROP_PRODUCTNAME, &prop_string.diph );
     ok( hr == DI_OK, "GetProperty DIPROP_PRODUCTNAME returned %#lx\n", hr );
-    todo_wine
     ok( !wcscmp( prop_string.wsz, expect_devinst.tszProductName ), "got product %s\n",
         debugstr_w(prop_string.wsz) );
 
@@ -2057,9 +2075,8 @@ static void test_simple_joystick( DWORD version )
     CloseHandle( file );
 
 done:
-    pnp_driver_stop();
+    hid_device_stop( &desc );
     cleanup_registry_keys();
-    SetCurrentDirectoryW( cwd );
     winetest_pop_context();
 }
 
@@ -2446,8 +2463,8 @@ static BOOL test_device_types( DWORD version )
             .guidProduct = expect_guid_product,
             .dwDevType = version >= 0x800 ? DIDEVTYPE_HID|(DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8)|DI8DEVTYPE_SUPPLEMENTAL
                                           : DIDEVTYPE_HID|(DIDEVTYPEJOYSTICK_UNKNOWN << 8)|DIDEVTYPE_JOYSTICK,
-            .tszInstanceName = L"Wine test root driver",
-            .tszProductName = L"Wine test root driver",
+            .tszInstanceName = L"Wine Test",
+            .tszProductName = L"Wine Test",
             .guidFFDriver = GUID_NULL,
             .wUsagePage = HID_USAGE_PAGE_GENERIC,
             .wUsage = HID_USAGE_GENERIC_JOYSTICK,
@@ -2458,8 +2475,8 @@ static BOOL test_device_types( DWORD version )
             .guidProduct = expect_guid_product,
             .dwDevType = version >= 0x800 ? DIDEVTYPE_HID|(DI8DEVTYPEJOYSTICK_LIMITED << 8)|DI8DEVTYPE_JOYSTICK
                                           : DIDEVTYPE_HID|(DIDEVTYPEJOYSTICK_UNKNOWN << 8)|DIDEVTYPE_JOYSTICK,
-            .tszInstanceName = L"Wine test root driver",
-            .tszProductName = L"Wine test root driver",
+            .tszInstanceName = L"Wine Test",
+            .tszProductName = L"Wine Test",
             .guidFFDriver = GUID_NULL,
             .wUsagePage = HID_USAGE_PAGE_GENERIC,
             .wUsage = HID_USAGE_GENERIC_JOYSTICK,
@@ -2470,8 +2487,8 @@ static BOOL test_device_types( DWORD version )
             .guidProduct = expect_guid_product,
             .dwDevType = version >= 0x800 ? DIDEVTYPE_HID|(DI8DEVTYPEGAMEPAD_STANDARD << 8)|DI8DEVTYPE_GAMEPAD
                                           : DIDEVTYPE_HID|(DIDEVTYPEJOYSTICK_GAMEPAD << 8)|DIDEVTYPE_JOYSTICK,
-            .tszInstanceName = L"Wine test root driver",
-            .tszProductName = L"Wine test root driver",
+            .tszInstanceName = L"Wine Test",
+            .tszProductName = L"Wine Test",
             .guidFFDriver = GUID_NULL,
             .wUsagePage = HID_USAGE_PAGE_GENERIC,
             .wUsage = HID_USAGE_GENERIC_GAMEPAD,
@@ -2482,8 +2499,8 @@ static BOOL test_device_types( DWORD version )
             .guidProduct = expect_guid_product,
             .dwDevType = version >= 0x800 ? DIDEVTYPE_HID|(DI8DEVTYPEJOYSTICK_STANDARD << 8)|DI8DEVTYPE_JOYSTICK
                                           : DIDEVTYPE_HID|(DIDEVTYPEJOYSTICK_UNKNOWN << 8)|DIDEVTYPE_JOYSTICK,
-            .tszInstanceName = L"Wine test root driver",
-            .tszProductName = L"Wine test root driver",
+            .tszInstanceName = L"Wine Test",
+            .tszProductName = L"Wine Test",
             .guidFFDriver = GUID_NULL,
             .wUsagePage = HID_USAGE_PAGE_GENERIC,
             .wUsage = HID_USAGE_GENERIC_JOYSTICK,
@@ -2494,8 +2511,8 @@ static BOOL test_device_types( DWORD version )
             .guidProduct = expect_guid_product,
             .dwDevType = version >= 0x800 ? DIDEVTYPE_HID|(DI8DEVTYPEDRIVING_LIMITED << 8)|DI8DEVTYPE_DRIVING
                                           : DIDEVTYPE_HID|(DIDEVTYPEJOYSTICK_WHEEL << 8)|DIDEVTYPE_JOYSTICK,
-            .tszInstanceName = L"Wine test root driver",
-            .tszProductName = L"Wine test root driver",
+            .tszInstanceName = L"Wine Test",
+            .tszProductName = L"Wine Test",
             .guidFFDriver = GUID_NULL,
             .wUsagePage = HID_USAGE_PAGE_GENERIC,
             .wUsage = HID_USAGE_GENERIC_JOYSTICK,
@@ -2506,8 +2523,8 @@ static BOOL test_device_types( DWORD version )
             .guidProduct = expect_guid_product,
             .dwDevType = version >= 0x800 ? DIDEVTYPE_HID|(DI8DEVTYPEDRIVING_DUALPEDALS << 8)|DI8DEVTYPE_DRIVING
                                           : DIDEVTYPE_HID|(DIDEVTYPEJOYSTICK_WHEEL << 8)|DIDEVTYPE_JOYSTICK,
-            .tszInstanceName = L"Wine test root driver",
-            .tszProductName = L"Wine test root driver",
+            .tszInstanceName = L"Wine Test",
+            .tszProductName = L"Wine Test",
             .guidFFDriver = GUID_NULL,
             .wUsagePage = HID_USAGE_PAGE_GENERIC,
             .wUsage = HID_USAGE_GENERIC_JOYSTICK,
@@ -2518,12 +2535,17 @@ static BOOL test_device_types( DWORD version )
             .guidProduct = expect_guid_product,
             .dwDevType = version >= 0x800 ? DIDEVTYPE_HID|(DI8DEVTYPEDRIVING_THREEPEDALS << 8)|DI8DEVTYPE_DRIVING
                                           : DIDEVTYPE_HID|(DIDEVTYPEJOYSTICK_WHEEL << 8)|DIDEVTYPE_JOYSTICK,
-            .tszInstanceName = L"Wine test root driver",
-            .tszProductName = L"Wine test root driver",
+            .tszInstanceName = L"Wine Test",
+            .tszProductName = L"Wine Test",
             .guidFFDriver = GUID_NULL,
             .wUsagePage = HID_USAGE_PAGE_GENERIC,
             .wUsage = HID_USAGE_GENERIC_JOYSTICK,
         },
+    };
+    struct hid_device_desc desc =
+    {
+        .use_report_id = TRUE,
+        .attributes = default_attributes,
     };
 
     C_ASSERT(ARRAY_SIZE(expect_caps) == ARRAY_SIZE(device_desc));
@@ -2531,7 +2553,6 @@ static BOOL test_device_types( DWORD version )
 
     DIDEVICEINSTANCEW devinst = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
     DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
     IDirectInputDevice8W *device;
     BOOL success = TRUE;
     ULONG i, ref;
@@ -2542,13 +2563,14 @@ static BOOL test_device_types( DWORD version )
     for (i = 0; i < ARRAY_SIZE(device_desc) && success; ++i)
     {
         winetest_push_context( "desc[%ld]", i );
-        GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-        GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-        SetCurrentDirectoryW( tempdir );
-
         cleanup_registry_keys();
-        if (!dinput_driver_start( device_desc[i].report_desc_buf, device_desc[i].report_desc_len,
-                                  &device_desc[i].hid_caps, NULL, 0 ))
+
+        desc.caps = device_desc[i].hid_caps;
+        desc.report_descriptor_len = device_desc[i].report_desc_len;
+        memcpy( desc.report_descriptor_buf, device_desc[i].report_desc_buf, device_desc[i].report_desc_len );
+        fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+
+        if (!hid_device_start( &desc ))
         {
             success = FALSE;
             goto done;
@@ -2589,9 +2611,8 @@ static BOOL test_device_types( DWORD version )
         ok( ref == 0, "Release returned %ld\n", ref );
 
     done:
-        pnp_driver_stop();
+        hid_device_stop( &desc );
         cleanup_registry_keys();
-        SetCurrentDirectoryW( cwd );
         winetest_pop_context();
     }
 
@@ -2632,9 +2653,11 @@ static void test_driving_wheel_axes(void)
 #undef REPORT_ID_OR_USAGE_PAGE
 #include "pop_hid_macros.h"
 
-    static const HIDP_CAPS hid_caps =
+    struct hid_device_desc desc =
     {
-        .InputReportByteLength = 7,
+        .use_report_id = TRUE,
+        .caps = { .InputReportByteLength = 7 },
+        .attributes = default_attributes,
     };
     const DIDEVCAPS expect_caps =
     {
@@ -2649,8 +2672,8 @@ static void test_driving_wheel_axes(void)
         .guidInstance = expect_guid_product,
         .guidProduct = expect_guid_product,
         .dwDevType = DIDEVTYPE_HID | (DI8DEVTYPEDRIVING_LIMITED << 8) | DI8DEVTYPE_DRIVING,
-        .tszInstanceName = L"Wine test root driver",
-        .tszProductName = L"Wine test root driver",
+        .tszInstanceName = L"Wine Test",
+        .tszProductName = L"Wine Test",
         .guidFFDriver = GUID_NULL,
         .wUsagePage = HID_USAGE_PAGE_GENERIC,
         .wUsage = HID_USAGE_GENERIC_JOYSTICK,
@@ -2746,35 +2769,26 @@ static void test_driving_wheel_axes(void)
             .wUsage = HID_USAGE_GENERIC_JOYSTICK,
         },
     };
-    struct check_objects_todos object_todos[ARRAY_SIZE(expect_objects)] =
-    {
-        {.name = TRUE},
-        {.name = TRUE},
-        {.name = TRUE},
-        {.name = TRUE},
-        {.name = TRUE},
-    };
     struct check_objects_params check_objects_params =
     {
         .version = DIRECTINPUT_VERSION,
         .expect_count = ARRAY_SIZE(expect_objects),
         .expect_objs = expect_objects,
-        .todo_objs = object_todos,
     };
 
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
     DIDEVICEINSTANCEW devinst = {0};
     IDirectInputDevice8W *device;
     DIDEVCAPS caps = {0};
     HRESULT hr;
     ULONG ref;
 
-    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-    SetCurrentDirectoryW( tempdir );
-
     cleanup_registry_keys();
-    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 )) goto done;
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+
+    if (!hid_device_start( &desc )) goto done;
     if (FAILED(hr = dinput_test_create_device( DIRECTINPUT_VERSION, &devinst, &device ))) goto done;
 
     check_dinput_devices( DIRECTINPUT_VERSION, &devinst );
@@ -2787,11 +2801,8 @@ static void test_driving_wheel_axes(void)
     todo_wine
     check_member_guid( devinst, expect_devinst, guidInstance );
     check_member_guid( devinst, expect_devinst, guidProduct );
-    todo_wine
     check_member( devinst, expect_devinst, "%#lx", dwDevType );
-    todo_wine
     check_member_wstr( devinst, expect_devinst, tszInstanceName );
-    todo_wine
     check_member_wstr( devinst, expect_devinst, tszProductName );
     check_member_guid( devinst, expect_devinst, guidFFDriver );
     check_member( devinst, expect_devinst, "%04x", wUsagePage );
@@ -2806,7 +2817,6 @@ static void test_driving_wheel_axes(void)
     ok( hr == DI_OK, "GetCapabilities returned %#lx\n", hr );
     check_member( caps, expect_caps, "%lu", dwSize );
     check_member( caps, expect_caps, "%#lx", dwFlags );
-    todo_wine
     check_member( caps, expect_caps, "%#lx", dwDevType );
     check_member( caps, expect_caps, "%lu", dwAxes );
     check_member( caps, expect_caps, "%lu", dwButtons );
@@ -2826,9 +2836,8 @@ static void test_driving_wheel_axes(void)
     ok( ref == 0, "Release returned %ld\n", ref );
 
 done:
-    pnp_driver_stop();
+    hid_device_stop( &desc );
     cleanup_registry_keys();
-    SetCurrentDirectoryW( cwd );
     winetest_pop_context();
 }
 
@@ -2883,9 +2892,11 @@ static BOOL test_winmm_joystick(void)
     };
 #include "pop_hid_macros.h"
 
-    static const HIDP_CAPS hid_caps =
+    struct hid_device_desc desc =
     {
-        .InputReportByteLength = 18,
+        .use_report_id = TRUE,
+        .caps = { .InputReportByteLength = 18 },
+        .attributes = default_attributes,
     };
     static const JOYCAPS2W expect_regcaps =
     {
@@ -2960,7 +2971,6 @@ static BOOL test_winmm_joystick(void)
             .dwHow = DIPH_DEVICE,
         },
     };
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
     IDirectInputDevice8W *device = NULL;
     DIDEVICEINSTANCEW devinst = {0};
     JOYCAPS2W caps = {0};
@@ -2968,10 +2978,6 @@ static BOOL test_winmm_joystick(void)
     HANDLE event, file;
     HRESULT hr;
     UINT ret;
-
-    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-    SetCurrentDirectoryW( tempdir );
 
     cleanup_registry_keys();
 
@@ -3012,7 +3018,11 @@ static BOOL test_winmm_joystick(void)
     check_member_guid( caps, expect_regcaps, ProductGuid );
     check_member_guid( caps, expect_regcaps, NameGuid );
 
-    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 )) goto done;
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+
+    if (!hid_device_start( &desc )) goto done;
 
     ret = joyGetNumDevs();
     ok( ret == 16, "joyGetNumDevs returned %u\n", ret );
@@ -3184,9 +3194,8 @@ static BOOL test_winmm_joystick(void)
     CloseHandle( file );
 
 done:
-    pnp_driver_stop();
+    hid_device_stop( &desc );
     cleanup_registry_keys();
-    SetCurrentDirectoryW( cwd );
 
     return device != NULL;
 }
@@ -3214,10 +3223,72 @@ static void check_runtimeclass_( int line, IInspectable *inspectable, const WCHA
 
     hr = IInspectable_GetRuntimeClassName( inspectable, &str );
     ok_ (__FILE__, line)( hr == S_OK, "GetRuntimeClassName returned %#lx\n", hr );
-    buffer = WindowsGetStringRawBuffer( str, &length );
+    buffer = pWindowsGetStringRawBuffer( str, &length );
     ok_ (__FILE__, line)( !wcscmp( buffer, class_name ), "got class name %s\n", debugstr_w(buffer) );
-    WindowsDeleteString( str );
+    pWindowsDeleteString( str );
 }
+
+struct controller_handler
+{
+    IEventHandler_RawGameController IEventHandler_RawGameController_iface;
+    HANDLE event;
+    BOOL invoked;
+};
+
+static inline struct controller_handler *impl_from_IEventHandler_RawGameController( IEventHandler_RawGameController *iface )
+{
+    return CONTAINING_RECORD( iface, struct controller_handler, IEventHandler_RawGameController_iface );
+}
+
+static HRESULT WINAPI controller_handler_QueryInterface( IEventHandler_RawGameController *iface, REFIID iid, void **out )
+{
+    if (IsEqualGUID( iid, &IID_IUnknown ) ||
+        IsEqualGUID( iid, &IID_IAgileObject ) ||
+        IsEqualGUID( iid, &IID_IEventHandler_RawGameController ))
+    {
+        IUnknown_AddRef( iface );
+        *out = iface;
+        return S_OK;
+    }
+
+    trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI controller_handler_AddRef( IEventHandler_RawGameController *iface )
+{
+    return 2;
+}
+
+static ULONG WINAPI controller_handler_Release( IEventHandler_RawGameController *iface )
+{
+    return 1;
+}
+
+static HRESULT WINAPI controller_handler_Invoke( IEventHandler_RawGameController *iface,
+                                                 IInspectable *sender, IRawGameController *controller )
+{
+    struct controller_handler *impl = impl_from_IEventHandler_RawGameController( iface );
+
+    trace( "iface %p, sender %p, controller %p\n", iface, sender, controller );
+
+    ok( sender == NULL, "got sender %p\n", sender );
+    SetEvent( impl->event );
+    impl->invoked = TRUE;
+
+    return S_OK;
+}
+
+static const IEventHandler_RawGameControllerVtbl controller_handler_vtbl =
+{
+    controller_handler_QueryInterface,
+    controller_handler_AddRef,
+    controller_handler_Release,
+    controller_handler_Invoke,
+};
+
+static struct controller_handler controller_added = {{&controller_handler_vtbl}};
 
 static void test_windows_gaming_input(void)
 {
@@ -3266,9 +3337,11 @@ static void test_windows_gaming_input(void)
     };
 #include "pop_hid_macros.h"
 
-    static const HIDP_CAPS hid_caps =
+    struct hid_device_desc desc =
     {
-        .InputReportByteLength = 8,
+        .use_report_id = TRUE,
+        .caps = { .InputReportByteLength = 8 },
+        .attributes = default_attributes,
     };
     static const WCHAR *controller_class_name = RuntimeClass_Windows_Gaming_Input_RawGameController;
     static const WCHAR *gamepad_class_name = RuntimeClass_Windows_Gaming_Input_Gamepad;
@@ -3276,7 +3349,7 @@ static void test_windows_gaming_input(void)
     IRawGameController *raw_controller, *tmp_raw_controller;
     IVectorView_RawGameController *controllers_view;
     IRawGameControllerStatics *controller_statics;
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
+    EventRegistrationToken controller_added_token;
     IVectorView_Gamepad *gamepads_view;
     IGamepadStatics *gamepad_statics;
     IGameController *game_controller;
@@ -3284,20 +3357,18 @@ static void test_windows_gaming_input(void)
     HSTRING str;
     HRESULT hr;
 
-    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-    SetCurrentDirectoryW( tempdir );
+    if (!load_combase_functions()) return;
 
     cleanup_registry_keys();
 
-    hr = RoInitialize( RO_INIT_MULTITHREADED );
+    hr = pRoInitialize( RO_INIT_MULTITHREADED );
     ok( hr == RPC_E_CHANGED_MODE, "RoInitialize returned %#lx\n", hr );
 
-    hr = WindowsCreateString( controller_class_name, wcslen( controller_class_name ), &str );
+    hr = pWindowsCreateString( controller_class_name, wcslen( controller_class_name ), &str );
     ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
-    hr = RoGetActivationFactory( str, &IID_IRawGameControllerStatics, (void **)&controller_statics );
+    hr = pRoGetActivationFactory( str, &IID_IRawGameControllerStatics, (void **)&controller_statics );
     ok( hr == S_OK || broken( hr == REGDB_E_CLASSNOTREG ), "RoGetActivationFactory returned %#lx\n", hr );
-    WindowsDeleteString( str );
+    pWindowsDeleteString( str );
 
     if (hr == REGDB_E_CLASSNOTREG)
     {
@@ -3311,7 +3382,21 @@ static void test_windows_gaming_input(void)
     ok( hr == S_OK, "get_Size returned %#lx\n", hr );
     ok( size == 0, "got size %u\n", size );
 
-    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 )) goto done;
+    controller_added.event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!controller_added.event, "CreateEventW failed, error %lu\n", GetLastError() );
+
+    hr = IRawGameControllerStatics_add_RawGameControllerAdded( controller_statics, &controller_added.IEventHandler_RawGameController_iface,
+                                                               &controller_added_token );
+    ok( hr == S_OK, "add_RawGameControllerAdded returned %#lx\n", hr );
+    ok( controller_added_token.value, "got token %I64u\n", controller_added_token.value );
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+
+    if (!hid_device_start( &desc )) goto done;
+    WaitForSingleObject( controller_added.event, INFINITE );
+    CloseHandle( controller_added.event );
 
     hr = IVectorView_RawGameController_get_Size( controllers_view, &size );
     ok( hr == S_OK, "get_Size returned %#lx\n", hr );
@@ -3322,29 +3407,23 @@ static void test_windows_gaming_input(void)
     ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
     hr = IVectorView_RawGameController_get_Size( controllers_view, &size );
     ok( hr == S_OK, "get_Size returned %#lx\n", hr );
-    todo_wine
     ok( size == 1, "got size %u\n", size );
     hr = IVectorView_RawGameController_GetAt( controllers_view, 0, &raw_controller );
-    todo_wine
     ok( hr == S_OK, "GetAt returned %#lx\n", hr );
     IVectorView_RawGameController_Release( controllers_view );
-    if (hr != S_OK)
-    {
-        IRawGameControllerStatics_Release( controller_statics );
-        goto done;
-    }
 
     /* HID gamepads aren't exposed as WGI gamepads on Windows */
 
-    hr = WindowsCreateString( gamepad_class_name, wcslen( gamepad_class_name ), &str );
+    hr = pWindowsCreateString( gamepad_class_name, wcslen( gamepad_class_name ), &str );
     ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
-    hr = RoGetActivationFactory( str, &IID_IGamepadStatics, (void **)&gamepad_statics );
+    hr = pRoGetActivationFactory( str, &IID_IGamepadStatics, (void **)&gamepad_statics );
     ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
-    WindowsDeleteString( str );
+    pWindowsDeleteString( str );
     hr = IGamepadStatics_get_Gamepads( gamepad_statics, &gamepads_view );
     ok( hr == S_OK, "get_Gamepads returned %#lx\n", hr );
     hr = IVectorView_Gamepad_get_Size( gamepads_view, &size );
     ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    todo_wine /* but Wine currently intentionally does */
     ok( size == 0, "got size %u\n", size );
     IVectorView_Gamepad_Release( gamepads_view );
     IGamepadStatics_Release( gamepad_statics );
@@ -3354,6 +3433,7 @@ static void test_windows_gaming_input(void)
     check_interface( raw_controller, &IID_IInspectable, TRUE );
     check_interface( raw_controller, &IID_IAgileObject, TRUE );
     check_interface( raw_controller, &IID_IRawGameController, TRUE );
+    todo_wine
     check_interface( raw_controller, &IID_IRawGameController2, TRUE );
     check_interface( raw_controller, &IID_IGameController, TRUE );
     check_interface( raw_controller, &IID_IGamepad, FALSE );
@@ -3366,6 +3446,7 @@ static void test_windows_gaming_input(void)
     check_interface( game_controller, &IID_IInspectable, TRUE );
     check_interface( game_controller, &IID_IAgileObject, TRUE );
     check_interface( game_controller, &IID_IRawGameController, TRUE );
+    todo_wine
     check_interface( game_controller, &IID_IRawGameController2, TRUE );
     check_interface( game_controller, &IID_IGameController, TRUE );
     check_interface( game_controller, &IID_IGamepad, FALSE );
@@ -3378,19 +3459,20 @@ static void test_windows_gaming_input(void)
     IGameController_Release( game_controller );
     IRawGameController_Release( raw_controller );
 
+    hr = IRawGameControllerStatics_remove_RawGameControllerAdded( controller_statics, controller_added_token );
+    ok( hr == S_OK, "remove_RawGameControllerAdded returned %#lx\n", hr );
+
     IRawGameControllerStatics_Release( controller_statics );
 
 done:
-    pnp_driver_stop();
+    hid_device_stop( &desc );
     cleanup_registry_keys();
-    SetCurrentDirectoryW( cwd );
-
-    RoUninitialize();
 }
 
 START_TEST( joystick8 )
 {
     if (!dinput_test_init()) return;
+    if (!bus_device_start()) goto done;
 
     CoInitialize( NULL );
     if (test_device_types( 0x800 ))
@@ -3411,5 +3493,7 @@ START_TEST( joystick8 )
     }
     CoUninitialize();
 
+done:
+    bus_device_stop();
     dinput_test_exit();
 }

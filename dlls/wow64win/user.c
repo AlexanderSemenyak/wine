@@ -26,7 +26,15 @@
 #include "winbase.h"
 #include "ntuser.h"
 #include "wow64win_private.h"
+#include "wine/debug.h"
 
+WINE_DEFAULT_DEBUG_CHANNEL(wow);
+
+NTSTATUS WINAPI wow64_NtUserInitializeClientPfnArrays( UINT *args )
+{
+    FIXME( "\n" );
+    return STATUS_NOT_SUPPORTED;
+}
 
 NTSTATUS WINAPI wow64_NtUserCreateWindowStation( UINT *args )
 {
@@ -181,6 +189,51 @@ NTSTATUS WINAPI wow64_NtUserRemoveProp( UINT *args )
     return HandleToUlong( NtUserRemoveProp( hwnd, str ));
 }
 
+NTSTATUS WINAPI wow64_NtUserGetAtomName( UINT *args )
+{
+    ATOM atom = get_ulong( &args );
+    UNICODE_STRING32 *str32 = get_ptr( &args );
+
+    UNICODE_STRING str;
+
+    return NtUserGetAtomName( atom, unicode_str_32to64( &str, str32 ));
+}
+
+NTSTATUS WINAPI wow64_NtUserGetClassName( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    BOOL real = get_ulong( &args );
+    UNICODE_STRING32 *str32 = get_ptr( &args );
+
+    UNICODE_STRING str;
+
+    return NtUserGetClassName( hwnd, real, unicode_str_32to64( &str, str32 ));
+}
+
+NTSTATUS WINAPI wow64_NtUserGetAncestor( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT type = get_ulong( &args );
+
+    return HandleToUlong( NtUserGetAncestor( hwnd, type ));
+}
+
+NTSTATUS WINAPI wow64_NtUserGetWindowRgnEx( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    HRGN hrgn = get_handle( &args );
+    UINT unk = get_ulong( &args );
+
+    return NtUserGetWindowRgnEx( hwnd, hrgn, unk );
+}
+
+NTSTATUS WINAPI wow64_NtUserWindowFromDC( UINT *args )
+{
+    HDC hdc = get_handle( &args );
+
+    return HandleToUlong( NtUserWindowFromDC( hdc ));
+}
+
 NTSTATUS WINAPI wow64_NtUserBuildHwndList( UINT *args )
 {
     HDESK desktop = get_handle( &args );
@@ -204,6 +257,15 @@ NTSTATUS WINAPI wow64_NtUserBuildHwndList( UINT *args )
     for (i = 0; i < *size; i++)
         buffer32[i] = HandleToUlong( buffer[i] );
     return status;
+}
+
+NTSTATUS WINAPI wow64_NtUserInternalGetWindowText( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    WCHAR *text = get_ptr( &args );
+    INT count = get_ulong( &args );
+
+    return NtUserInternalGetWindowText( hwnd, text, count );
 }
 
 NTSTATUS WINAPI wow64_NtUserGetLayeredWindowAttributes( UINT *args )
@@ -490,4 +552,57 @@ NTSTATUS WINAPI wow64_NtUserGetGUIThreadInfo( UINT *args )
     info32->hwndCaret     = HandleToUlong( info.hwndCaret );
     info32->rcCaret       = info.rcCaret;
     return TRUE;
+}
+
+NTSTATUS WINAPI wow64_NtUserSetSystemTimer( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT_PTR id = get_ulong( &args );
+    UINT timeout = get_ulong( &args );
+    TIMERPROC proc = get_ptr( &args );
+
+    return NtUserSetSystemTimer( hwnd, id, timeout, proc );
+}
+
+NTSTATUS WINAPI wow64_NtUserSetTimer( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT_PTR id = get_ulong( &args );
+    UINT timeout = get_ulong( &args );
+    TIMERPROC proc = get_ptr( &args );
+    ULONG tolerance = get_ulong( &args );
+
+    return NtUserSetTimer( hwnd, id, timeout, proc, tolerance );
+}
+
+NTSTATUS WINAPI wow64_NtUserKillTimer( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT_PTR id = get_ulong( &args );
+
+    return NtUserKillTimer( hwnd, id );
+}
+
+NTSTATUS WINAPI wow64_NtUserCopyAcceleratorTable( UINT *args )
+{
+    HACCEL src = get_handle( &args );
+    ACCEL *dst = get_ptr( &args );
+    INT count = get_ulong( &args );
+
+    return NtUserCopyAcceleratorTable( src, dst, count );
+}
+
+NTSTATUS WINAPI wow64_NtUserCreateAcceleratorTable( UINT *args )
+{
+    ACCEL *table = get_ptr( &args );
+    INT count = get_ulong( &args );
+
+    return HandleToUlong( NtUserCreateAcceleratorTable( table, count ));
+}
+
+NTSTATUS WINAPI wow64_NtUserDestroyAcceleratorTable( UINT *args )
+{
+    HACCEL handle = get_handle( &args );
+
+    return NtUserDestroyAcceleratorTable( handle );
 }
