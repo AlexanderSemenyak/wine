@@ -416,6 +416,16 @@ NTSTATUS WINAPI wow64_NtUserGetMouseMovePointsEx( UINT *args )
     return NtUserGetMouseMovePointsEx( size, ptin, ptout, count, resolution );
 }
 
+NTSTATUS WINAPI wow64_NtUserChildWindowFromPointEx( UINT *args )
+{
+    HWND parent = get_handle( &args );
+    LONG x = get_ulong( &args );
+    LONG y = get_ulong( &args );
+    UINT flags = get_ulong( &args );
+
+    return HandleToUlong( NtUserChildWindowFromPointEx( parent, x, y, flags ));
+}
+
 NTSTATUS WINAPI wow64_NtUserSetProcessDpiAwarenessContext( UINT *args )
 {
     ULONG awareness = get_ulong( &args );
@@ -605,4 +615,13 @@ NTSTATUS WINAPI wow64_NtUserDestroyAcceleratorTable( UINT *args )
     HACCEL handle = get_handle( &args );
 
     return NtUserDestroyAcceleratorTable( handle );
+}
+
+NTSTATUS WINAPI wow64_NtUserCheckMenuItem( UINT *args )
+{
+    HMENU handle = get_handle( &args );
+    UINT id = get_ulong( &args );
+    UINT flags = get_ulong( &args );
+
+    return NtUserCheckMenuItem( handle, id, flags );
 }

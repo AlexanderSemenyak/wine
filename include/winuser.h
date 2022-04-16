@@ -4128,6 +4128,7 @@ WINUSERAPI BOOL        WINAPI RegisterPointerDeviceNotifications(HWND,BOOL);
 WINUSERAPI HPOWERNOTIFY WINAPI RegisterPowerSettingNotification(HANDLE,LPCGUID,DWORD);
 WINUSERAPI BOOL        WINAPI RegisterRawInputDevices(PRAWINPUTDEVICE,UINT,UINT);
 WINUSERAPI BOOL        WINAPI RegisterShellHookWindow(HWND);
+WINUSERAPI HPOWERNOTIFY WINAPI RegisterSuspendResumeNotification(HANDLE,DWORD);
 WINUSERAPI BOOL        WINAPI RegisterTouchWindow(HWND,ULONG);
 WINUSERAPI UINT        WINAPI RegisterWindowMessageA(LPCSTR);
 WINUSERAPI UINT        WINAPI RegisterWindowMessageW(LPCWSTR);
@@ -4300,6 +4301,7 @@ WINUSERAPI BOOL        WINAPI UnregisterClassW(LPCWSTR,HINSTANCE);
 WINUSERAPI BOOL        WINAPI UnregisterDeviceNotification(HDEVNOTIFY);
 WINUSERAPI BOOL        WINAPI UnregisterHotKey(HWND,INT);
 WINUSERAPI BOOL        WINAPI UnregisterPowerSettingNotification(HPOWERNOTIFY);
+WINUSERAPI BOOL        WINAPI UnregisterSuspendResumeNotification(HPOWERNOTIFY);
 WINUSERAPI BOOL        WINAPI UnregisterTouchWindow(HWND);
 WINUSERAPI BOOL        WINAPI UpdateWindow(HWND);
 WINUSERAPI BOOL        WINAPI UserHandleGrantAccess(HANDLE,HANDLE,BOOL);
@@ -4442,7 +4444,7 @@ struct user_api_hook
     LRESULT (WINAPI *pScrollBarWndProc)(HWND, UINT, WPARAM, LPARAM, BOOL);
 };
 
-WINUSERAPI BOOL WINAPI RegisterUserApiHook(const struct user_api_hook *new, struct user_api_hook *old);
+WINUSERAPI BOOL WINAPI RegisterUserApiHook(const struct user_api_hook *new_hook, struct user_api_hook *old_hook);
 WINUSERAPI void WINAPI UnregisterUserApiHook(void);
 #endif
 

@@ -29,76 +29,68 @@
 
 #include "wine/test.h"
 
-
-static BOOL (WINAPI *pCryptEnumOIDInfo)(DWORD,DWORD,void*,PFN_CRYPT_ENUM_OID_INFO);
-
-
 struct OIDToAlgID
 {
     LPCSTR oid;
-    LPCSTR altOid;
     DWORD algID;
     DWORD altAlgID;
 };
 
 static const struct OIDToAlgID oidToAlgID[] = {
- { szOID_RSA_RSA, NULL, CALG_RSA_KEYX },
- { szOID_RSA_MD2RSA, NULL, CALG_MD2 },
- { szOID_RSA_MD4RSA, NULL, CALG_MD4 },
- { szOID_RSA_MD5RSA, NULL, CALG_MD5 },
- { szOID_RSA_SHA1RSA, NULL, CALG_SHA },
- { szOID_RSA_DH, NULL, CALG_DH_SF },
- { szOID_RSA_SMIMEalgESDH, NULL, CALG_DH_EPHEM },
- { szOID_RSA_SMIMEalgCMS3DESwrap, NULL, CALG_3DES },
- { szOID_RSA_SMIMEalgCMSRC2wrap, NULL, CALG_RC2 },
- { szOID_RSA_MD2, NULL, CALG_MD2 },
- { szOID_RSA_MD4, NULL, CALG_MD4 },
- { szOID_RSA_MD5, NULL, CALG_MD5 },
- { szOID_RSA_RC2CBC, NULL, CALG_RC2 },
- { szOID_RSA_RC4, NULL, CALG_RC4 },
- { szOID_RSA_DES_EDE3_CBC, NULL, CALG_3DES },
- { szOID_ANSI_X942_DH, NULL, CALG_DH_SF },
- { szOID_X957_DSA, NULL, CALG_DSS_SIGN },
- { szOID_X957_SHA1DSA, NULL, CALG_SHA },
- { szOID_OIWSEC_md4RSA, NULL, CALG_MD4 },
- { szOID_OIWSEC_md5RSA, NULL, CALG_MD5 },
- { szOID_OIWSEC_md4RSA2, NULL, CALG_MD4 },
- { szOID_OIWSEC_desCBC, NULL, CALG_DES },
- { szOID_OIWSEC_dsa, NULL, CALG_DSS_SIGN },
- { szOID_OIWSEC_shaDSA, NULL, CALG_SHA },
- { szOID_OIWSEC_shaRSA, NULL, CALG_SHA },
- { szOID_OIWSEC_sha, NULL, CALG_SHA },
- { szOID_OIWSEC_rsaXchg, NULL, CALG_RSA_KEYX },
- { szOID_OIWSEC_sha1, NULL, CALG_SHA },
- { szOID_OIWSEC_dsaSHA1, NULL, CALG_SHA },
- { szOID_OIWSEC_sha1RSASign, NULL, CALG_SHA },
- { szOID_OIWDIR_md2RSA, NULL, CALG_MD2 },
- { szOID_INFOSEC_mosaicUpdatedSig, NULL, CALG_SHA },
- { szOID_INFOSEC_mosaicKMandUpdSig, NULL, CALG_DSS_SIGN },
- { szOID_NIST_sha256, NULL, CALG_SHA_256, -1 },
- { szOID_NIST_sha384, NULL, CALG_SHA_384, -1 },
- { szOID_NIST_sha512, NULL, CALG_SHA_512, -1 }
+ { szOID_RSA_RSA, CALG_RSA_KEYX },
+ { szOID_RSA_MD2RSA, CALG_MD2 },
+ { szOID_RSA_MD4RSA, CALG_MD4 },
+ { szOID_RSA_MD5RSA, CALG_MD5 },
+ { szOID_RSA_SHA1RSA, CALG_SHA },
+ { szOID_RSA_DH, CALG_DH_SF },
+ { szOID_RSA_SMIMEalgESDH, CALG_DH_EPHEM },
+ { szOID_RSA_SMIMEalgCMS3DESwrap, CALG_3DES },
+ { szOID_RSA_SMIMEalgCMSRC2wrap, CALG_RC2 },
+ { szOID_RSA_MD2, CALG_MD2 },
+ { szOID_RSA_MD4, CALG_MD4 },
+ { szOID_RSA_MD5, CALG_MD5 },
+ { szOID_RSA_RC2CBC, CALG_RC2 },
+ { szOID_RSA_RC4, CALG_RC4 },
+ { szOID_RSA_DES_EDE3_CBC, CALG_3DES },
+ { szOID_ANSI_X942_DH, CALG_DH_SF },
+ { szOID_X957_DSA, CALG_DSS_SIGN },
+ { szOID_X957_SHA1DSA, CALG_SHA },
+ { szOID_OIWSEC_md4RSA, CALG_MD4 },
+ { szOID_OIWSEC_md5RSA, CALG_MD5 },
+ { szOID_OIWSEC_md4RSA2, CALG_MD4 },
+ { szOID_OIWSEC_desCBC, CALG_DES },
+ { szOID_OIWSEC_dsa, CALG_DSS_SIGN },
+ { szOID_OIWSEC_shaDSA, CALG_SHA },
+ { szOID_OIWSEC_shaRSA, CALG_SHA },
+ { szOID_OIWSEC_sha, CALG_SHA },
+ { szOID_OIWSEC_rsaXchg, CALG_RSA_KEYX },
+ { szOID_OIWSEC_sha1, CALG_SHA },
+ { szOID_OIWSEC_dsaSHA1, CALG_SHA },
+ { szOID_OIWSEC_sha1RSASign, CALG_SHA },
+ { szOID_OIWDIR_md2RSA, CALG_MD2 },
+ { szOID_INFOSEC_mosaicUpdatedSig, CALG_SHA },
+ { szOID_INFOSEC_mosaicKMandUpdSig, CALG_DSS_SIGN },
+ { szOID_NIST_sha256, CALG_SHA_256, -1 },
+ { szOID_NIST_sha384, CALG_SHA_384, -1 },
+ { szOID_NIST_sha512, CALG_SHA_512, -1 }
 };
 
 static const struct OIDToAlgID algIDToOID[] = {
- { szOID_RSA_RSA, NULL, CALG_RSA_KEYX },
- { szOID_RSA_SMIMEalgESDH, NULL, CALG_DH_EPHEM },
- { szOID_RSA_MD2, NULL, CALG_MD2 },
- { szOID_RSA_MD4, NULL, CALG_MD4 },
- { szOID_RSA_MD5, NULL, CALG_MD5 },
- { szOID_RSA_RC2CBC, NULL, CALG_RC2 },
- { szOID_RSA_RC4, NULL, CALG_RC4 },
- { szOID_RSA_DES_EDE3_CBC, NULL, CALG_3DES },
- { szOID_ANSI_X942_DH, NULL, CALG_DH_SF },
- { szOID_X957_DSA, szOID_OIWSEC_dsa /* some Win98 */, CALG_DSS_SIGN },
- { szOID_OIWSEC_desCBC, NULL, CALG_DES },
- { szOID_OIWSEC_sha1, NULL, CALG_SHA },
+ { szOID_RSA_RSA, CALG_RSA_KEYX },
+ { szOID_RSA_SMIMEalgESDH, CALG_DH_EPHEM },
+ { szOID_RSA_MD2, CALG_MD2 },
+ { szOID_RSA_MD4, CALG_MD4 },
+ { szOID_RSA_MD5, CALG_MD5 },
+ { szOID_RSA_RC2CBC, CALG_RC2 },
+ { szOID_RSA_RC4, CALG_RC4 },
+ { szOID_RSA_DES_EDE3_CBC, CALG_3DES },
+ { szOID_ANSI_X942_DH, CALG_DH_SF },
+ { szOID_X957_DSA, CALG_DSS_SIGN },
+ { szOID_OIWSEC_desCBC, CALG_DES },
+ { szOID_OIWSEC_sha1, CALG_SHA },
 };
 
-static const WCHAR bogusDll[] = { 'b','o','g','u','s','.','d','l','l',0 };
-static const WCHAR bogus2Dll[] = { 'b','o','g','u','s','2','.','d','l','l',0 };
-
-static void testOIDToAlgID(void)
+static void test_OIDToAlgID(void)
 {
     int i;
     DWORD alg;
@@ -115,7 +107,7 @@ static void testOIDToAlgID(void)
     }
 }
 
-static void testAlgIDToOID(void)
+static void test_AlgIDToOID(void)
 {
     int i;
     LPCSTR oid;
@@ -129,27 +121,9 @@ static void testAlgIDToOID(void)
     {
         oid = CertAlgIdToOID(algIDToOID[i].algID);
         /* Allow failure, not every version of Windows supports every algo */
-        ok(oid != NULL || broken(!oid), "CertAlgIdToOID failed, expected %s\n", algIDToOID[i].oid);
+        ok(oid != NULL, "CertAlgIdToOID failed, expected %s\n", algIDToOID[i].oid);
         if (oid)
-        {
-            if (strcmp(oid, algIDToOID[i].oid))
-            {
-                if (algIDToOID[i].altOid)
-                    ok(!strcmp(oid, algIDToOID[i].altOid),
-                     "Expected %s or %s, got %s\n", algIDToOID[i].oid,
-                     algIDToOID[i].altOid, oid);
-                else
-                {
-                    /* No need to rerun the test, we already know it failed. */
-                    ok(0, "Expected %s, got %s\n", algIDToOID[i].oid, oid);
-                }
-            }
-            else
-            {
-                /* No need to rerun the test, we already know it succeeded. */
-                ok(1, "Expected %s, got %s\n", algIDToOID[i].oid, oid);
-            }
-        }
+            ok(!strcmp(oid, algIDToOID[i].oid), "Expected %s, got %s\n", algIDToOID[i].oid, oid);
     }
 }
 
@@ -216,8 +190,7 @@ static void test_oidFunctionSet(void)
 
         ret = CryptGetOIDFunctionAddress(set1, X509_ASN_ENCODING, X509_CERT, 0,
          &funcAddr, &hFuncAddr);
-        ok((!ret && GetLastError() == ERROR_FILE_NOT_FOUND) ||
-         broken(ret) /* some Win98 */,
+        ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
          "Expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
     }
 }
@@ -269,10 +242,8 @@ static void test_installOIDFunctionAddress(void)
          */
         ret = CryptGetOIDFunctionAddress(set, X509_ASN_ENCODING, 0, 0,
          (void **)&funcAddr, &hFuncAddr);
-        ok(!ret && (GetLastError() == ERROR_FILE_NOT_FOUND ||
-         GetLastError() == E_INVALIDARG /* some Win98 */),
-         "Expected ERROR_FILE_NOT_FOUND or E_INVALIDARG, got %ld\n",
-         GetLastError());
+        ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+         "Expected ERROR_FILE_NOT_FOUND, got %ld\n", GetLastError());
         ret = CryptGetOIDFunctionAddress(set, X509_ASN_ENCODING, X509_CERT, 0,
          (void **)&funcAddr, &hFuncAddr);
         ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
@@ -298,12 +269,12 @@ static void test_registerOIDFunction(void)
      * omitted.  This may be a side effect of the registry code, I don't know.
      * I don't check it because I doubt anyone would depend on it.
     ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, NULL,
-     "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
+     "1.2.3.4.5.6.7.8.9.10", L"bogus.dll", NULL);
      */
     /* On windows XP, GetLastError is incorrectly being set with an HRESULT,
      * E_INVALIDARG
      */
-    ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, "foo", NULL, bogusDll,
+    ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, "foo", NULL, L"bogus.dll",
      NULL);
     ok(!ret && GetLastError() == E_INVALIDARG,
      "Expected E_INVALIDARG: %ld\n", GetLastError());
@@ -313,7 +284,7 @@ static void test_registerOIDFunction(void)
     ok(ret, "Expected pseudo-success, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, "CryptDllEncodeObject",
-     "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
+     "1.2.3.4.5.6.7.8.9.10", L"bogus.dll", NULL);
     if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
     {
         skip("Need admin rights\n");
@@ -324,7 +295,7 @@ static void test_registerOIDFunction(void)
      "1.2.3.4.5.6.7.8.9.10");
     ok(ret, "CryptUnregisterOIDFunction failed: %ld\n", GetLastError());
     ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, "bogus",
-     "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
+     "1.2.3.4.5.6.7.8.9.10", L"bogus.dll", NULL);
     ok(ret, "CryptRegisterOIDFunction failed: %ld\n", GetLastError());
     ret = CryptUnregisterOIDFunction(X509_ASN_ENCODING, "bogus",
      "1.2.3.4.5.6.7.8.9.10");
@@ -335,14 +306,14 @@ static void test_registerOIDFunction(void)
      "Could not delete bogus key\n");
     /* Shouldn't have effect but registry keys are created */
     ret = CryptRegisterOIDFunction(PKCS_7_ASN_ENCODING, "CryptDllEncodeObject",
-     "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
+     "1.2.3.4.5.6.7.8.9.10", L"bogus.dll", NULL);
     ok(ret, "CryptRegisterOIDFunction failed: %ld\n", GetLastError());
     ret = CryptUnregisterOIDFunction(PKCS_7_ASN_ENCODING, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10");
     ok(ret, "CryptUnregisterOIDFunction failed: %ld\n", GetLastError());
     /* Check with bogus encoding type. Registry keys are still created */
     ret = CryptRegisterOIDFunction(0, "CryptDllEncodeObject",
-     "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
+     "1.2.3.4.5.6.7.8.9.10", L"bogus.dll", NULL);
     ok(ret, "CryptRegisterOIDFunction failed: %ld\n", GetLastError());
     ret = CryptUnregisterOIDFunction(0, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10");
@@ -357,7 +328,7 @@ static void test_registerOIDFunction(void)
      * (for now) treated as a mask. Registry keys are created.
      */
     ret = CryptRegisterOIDFunction(3, "CryptDllEncodeObject",
-     "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
+     "1.2.3.4.5.6.7.8.9.10", L"bogus.dll", NULL);
     ok(ret, "CryptRegisterOIDFunction failed: %ld\n", GetLastError());
     ret = CryptUnregisterOIDFunction(3, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10");
@@ -387,12 +358,12 @@ static void test_registerDefaultOIDFunction(void)
     ok(!ret && GetLastError() == E_INVALIDARG,
      "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     /* This succeeds on WinXP, although the bogus entry is unusable.
-    ret = CryptRegisterDefaultOIDFunction(0, NULL, 0, bogusDll);
+    ret = CryptRegisterDefaultOIDFunction(0, NULL, 0, L"bogus.dll");
      */
     /* Register one at index 0 */
     SetLastError(0xdeadbeef);
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
-     bogusDll);
+     L"bogus.dll");
     if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
     {
         skip("Need admin rights\n");
@@ -401,66 +372,63 @@ static void test_registerDefaultOIDFunction(void)
     ok(ret, "CryptRegisterDefaultOIDFunction failed: %08lx\n", GetLastError());
     /* Reregistering should fail */
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
-     bogusDll);
+     L"bogus.dll");
     ok(!ret && GetLastError() == ERROR_FILE_EXISTS,
      "Expected ERROR_FILE_EXISTS, got %08lx\n", GetLastError());
     /* Registering the same one at index 1 should also fail */
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 1,
-     bogusDll);
+     L"bogus.dll");
     ok(!ret && GetLastError() == ERROR_FILE_EXISTS,
      "Expected ERROR_FILE_EXISTS, got %08lx\n", GetLastError());
     /* Registering a different one at index 1 succeeds */
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 1,
-     bogus2Dll);
+     L"bogus2.dll");
     ok(ret, "CryptRegisterDefaultOIDFunction failed: %08lx\n", GetLastError());
     sprintf(buf, fmt, 0, func);
     rc = RegOpenKeyA(HKEY_LOCAL_MACHINE, buf, &key);
     ok(rc == 0, "Expected key to exist, RegOpenKeyA failed: %ld\n", rc);
     if (rc == 0)
     {
-        static const CHAR dllA[] = "Dll";
-        static const CHAR bogusDll_A[] = "bogus.dll";
-        static const CHAR bogus2Dll_A[] = "bogus2.dll";
         CHAR dllBuf[MAX_PATH];
         DWORD type, size;
         LPSTR ptr;
 
         size = ARRAY_SIZE(dllBuf);
-        rc = RegQueryValueExA(key, dllA, NULL, &type, (LPBYTE)dllBuf, &size);
+        rc = RegQueryValueExA(key, "Dll", NULL, &type, (LPBYTE)dllBuf, &size);
         ok(rc == 0,
          "Expected Dll value to exist, RegQueryValueExA failed: %ld\n", rc);
         ok(type == REG_MULTI_SZ, "Expected type REG_MULTI_SZ, got %ld\n", type);
-        /* bogusDll was registered first, so that should be first */
+        /* bogus.dll was registered first, so that should be first */
         ptr = dllBuf;
-        ok(!lstrcmpiA(ptr, bogusDll_A), "Unexpected dll\n");
+        ok(!lstrcmpiA(ptr, "bogus.dll"), "Unexpected dll\n");
         ptr += lstrlenA(ptr) + 1;
-        ok(!lstrcmpiA(ptr, bogus2Dll_A), "Unexpected dll\n");
+        ok(!lstrcmpiA(ptr, "bogus2.dll"), "Unexpected dll\n");
         RegCloseKey(key);
     }
     /* Unregister both of them */
     ret = CryptUnregisterDefaultOIDFunction(0, "CertDllOpenStoreProv",
-     bogusDll);
+     L"bogus.dll");
     ok(ret, "CryptUnregisterDefaultOIDFunction failed: %08lx\n",
      GetLastError());
     ret = CryptUnregisterDefaultOIDFunction(0, "CertDllOpenStoreProv",
-     bogus2Dll);
+     L"bogus2.dll");
     ok(ret, "CryptUnregisterDefaultOIDFunction failed: %08lx\n",
      GetLastError());
     /* Now that they're both unregistered, unregistering should fail */
     ret = CryptUnregisterDefaultOIDFunction(0, "CertDllOpenStoreProv",
-     bogusDll);
+     L"bogus.dll");
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
      "Expected ERROR_FILE_NOT_FOUND, got %ld\n", GetLastError());
 
     /* Repeat a few tests on the normal encoding type */
     ret = CryptRegisterDefaultOIDFunction(X509_ASN_ENCODING,
-     "CertDllOpenStoreProv", 0, bogusDll);
+     "CertDllOpenStoreProv", 0, L"bogus.dll");
     ok(ret, "CryptRegisterDefaultOIDFunction failed\n");
     ret = CryptUnregisterDefaultOIDFunction(X509_ASN_ENCODING,
-     "CertDllOpenStoreProv", bogusDll);
+     "CertDllOpenStoreProv", L"bogus.dll");
     ok(ret, "CryptUnregisterDefaultOIDFunction failed\n");
     ret = CryptUnregisterDefaultOIDFunction(X509_ASN_ENCODING,
-     "CertDllOpenStoreProv", bogusDll);
+     "CertDllOpenStoreProv", L"bogus.dll");
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
      "Expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
 }
@@ -498,7 +466,7 @@ static void test_getDefaultOIDFunctionAddress(void)
     /* Even with a registered dll, this fails (since the dll doesn't exist) */
     SetLastError(0xdeadbeef);
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
-     bogusDll);
+     L"bogus.dll");
     if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
         skip("Need admin rights\n");
     else
@@ -507,7 +475,7 @@ static void test_getDefaultOIDFunctionAddress(void)
      &hFuncAddr);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
      "Expected ERROR_FILE_NOT_FOUND, got %ld\n", GetLastError());
-    CryptUnregisterDefaultOIDFunction(0, "CertDllOpenStoreProv", bogusDll);
+    CryptUnregisterDefaultOIDFunction(0, "CertDllOpenStoreProv", L"bogus.dll");
 }
 
 static BOOL WINAPI countOidInfo(PCCRYPT_OID_INFO pInfo, void *pvArg)
@@ -526,27 +494,19 @@ static void test_enumOIDInfo(void)
     BOOL ret;
     DWORD count = 0;
 
-    if (!pCryptEnumOIDInfo)
-    {
-        win_skip("CryptEnumOIDInfo() is not available\n");
-        return;
-    }
-
     /* This crashes
-    ret = pCryptEnumOIDInfo(7, 0, NULL, NULL);
+    ret = CryptEnumOIDInfo(7, 0, NULL, NULL);
      */
 
     /* Silly tests, check that more than one thing is enumerated */
-    ret = pCryptEnumOIDInfo(0, 0, &count, countOidInfo);
+    ret = CryptEnumOIDInfo(0, 0, &count, countOidInfo);
     ok(ret && count > 0, "Expected more than item enumerated\n");
-    ret = pCryptEnumOIDInfo(0, 0, NULL, noOidInfo);
+    ret = CryptEnumOIDInfo(0, 0, NULL, noOidInfo);
     ok(!ret, "Expected FALSE\n");
 }
 
 static void test_findOIDInfo(void)
 {
-    static WCHAR sha256ECDSA[] = { 's','h','a','2','5','6','E','C','D','S','A',0 };
-    static WCHAR sha1[] = { 's','h','a','1',0 };
     static CHAR oid_rsa_md5[] = szOID_RSA_MD5, oid_sha256[] = szOID_NIST_sha256;
     static CHAR oid_ecdsa_sha256[] = szOID_ECDSA_SHA256;
     ALG_ID alg = CALG_SHA1;
@@ -561,7 +521,7 @@ static void test_findOIDInfo(void)
     } oid_test_info [] =
     {
         { CRYPT_OID_INFO_OID_KEY, oid_rsa_md5, szOID_RSA_MD5, CALG_MD5 },
-        { CRYPT_OID_INFO_NAME_KEY, sha1, szOID_OIWSEC_sha1, CALG_SHA1 },
+        { CRYPT_OID_INFO_NAME_KEY, (void *)L"sha1", szOID_OIWSEC_sha1, CALG_SHA1 },
         { CRYPT_OID_INFO_ALGID_KEY, &alg, szOID_OIWSEC_sha1, CALG_SHA1 },
         { CRYPT_OID_INFO_SIGN_KEY, algs, szOID_RSA_MD5RSA, CALG_MD5 },
         { CRYPT_OID_INFO_OID_KEY, oid_sha256, szOID_NIST_sha256, CALG_SHA_256, -1 },
@@ -593,8 +553,8 @@ static void test_findOIDInfo(void)
 
         ok(info->cbSize == sizeof(*info), "Unexpected structure size %ld.\n", info->cbSize);
         ok(!strcmp(info->pszOID, oid_ecdsa_sha256), "Expected %s, got %s\n", oid_ecdsa_sha256, info->pszOID);
-        ok(!lstrcmpW(info->pwszName, sha256ECDSA), "Expected %s, got %s\n",
-            wine_dbgstr_w(sha256ECDSA), wine_dbgstr_w(info->pwszName));
+        ok(!lstrcmpW(info->pwszName, L"sha256ECDSA"), "Expected %s, got %s\n",
+            wine_dbgstr_w(L"sha256ECDSA"), wine_dbgstr_w(info->pwszName));
         ok(info->dwGroupId == CRYPT_SIGN_ALG_OID_GROUP_ID,
            "Expected CRYPT_SIGN_ALG_OID_GROUP_ID, got %lu\n", info->dwGroupId);
         ok(U(*info).Algid == CALG_OID_INFO_CNG_ONLY,
@@ -617,7 +577,6 @@ static void test_findOIDInfo(void)
 
 static void test_registerOIDInfo(void)
 {
-    static const WCHAR winetestW[] = { 'w','i','n','e','t','e','s','t',0 };
     static char test_oid[] = "1.2.3.4.5.6.7.8.9.10";
     CRYPT_OID_INFO info1;
     const CRYPT_OID_INFO *info2;
@@ -665,7 +624,7 @@ static void test_registerOIDInfo(void)
     info2 = CryptFindOIDInfo(CRYPT_OID_INFO_OID_KEY, (void *)test_oid, 0);
     ok(!info2, "should fail\n");
 
-    info1.pwszName = winetestW;
+    info1.pwszName = L"winetest";
     info1.dwGroupId = CRYPT_HASH_ALG_OID_GROUP_ID;
     SetLastError(0xdeadbeef);
     ret = CryptRegisterOIDInfo(&info1, CRYPT_INSTALL_OID_INFO_BEFORE_FLAG);
@@ -709,11 +668,8 @@ static void test_registerOIDInfo(void)
 
 START_TEST(oid)
 {
-    HMODULE hCrypt32 = GetModuleHandleA("crypt32.dll");
-    pCryptEnumOIDInfo = (void*)GetProcAddress(hCrypt32, "CryptEnumOIDInfo");
-
-    testOIDToAlgID();
-    testAlgIDToOID();
+    test_OIDToAlgID();
+    test_AlgIDToOID();
     test_enumOIDInfo();
     test_findOIDInfo();
     test_registerOIDInfo();

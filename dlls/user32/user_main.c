@@ -26,6 +26,7 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "imm.h"
+#include "ddk/imm.h"
 
 #include "controls.h"
 #include "user_private.h"
@@ -75,7 +76,7 @@ void USER_CheckNotLock(void)
  */
 UINT WINAPI UserRealizePalette( HDC hdc )
 {
-    return NtUserCallOneParam( HandleToUlong(hdc), NtUserRealizePalette );
+    return NtUserRealizePalette( hdc );
 }
 
 
@@ -153,7 +154,6 @@ static void WINAPI unregister_imm( HWND hwnd )
 
 static void CDECL free_win_ptr( WND *win )
 {
-    HeapFree( GetProcessHeap(), 0, win->text );
     HeapFree( GetProcessHeap(), 0, win->pScroll );
 }
 
@@ -164,24 +164,21 @@ static const struct user_callbacks user_funcs =
     DestroyCaret,
     EndMenu,
     HideCaret,
-    PostMessageW,
-    SendInput,
-    SendMessageTimeoutW,
-    SendMessageA,
-    SendMessageW,
-    SendNotifyMessageW,
+    ImmProcessKey,
+    ImmTranslateMessage,
     SetSystemMenu,
     ShowCaret,
-    WaitForInputIdle,
     free_menu_items,
     free_win_ptr,
     MENU_IsMenuActive,
     notify_ime,
+    post_dde_message,
+    process_rawinput_message,
+    rawinput_device_get_usages,
     register_builtin_classes,
-    MSG_SendInternalMessageTimeout,
     MENU_SetMenu,
     SCROLL_SetStandardScrollPainted,
-    (void *)__wine_set_user_driver,
+    unpack_dde_message,
     register_imm,
     unregister_imm,
 };
@@ -194,6 +191,7 @@ static BOOL WINAPI User32LoadDriver( const WCHAR *path, ULONG size )
 static const void *kernel_callback_table[NtUserCallCount] =
 {
     User32CallEnumDisplayMonitor,
+    User32CallSendAsyncCallback,
     User32CallWinEventHook,
     User32CallWindowProc,
     User32CallWindowsHook,
@@ -273,7 +271,6 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
         thread_detach();
         break;
     case DLL_PROCESS_DETACH:
-        USER_unload_driver();
         FreeLibrary(imm32_module);
         break;
     }
@@ -370,10 +367,11 @@ const char *SPY_GetVKeyName( WPARAM wparam )
 
 void SPY_EnterMessage( INT flag, HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    if (TRACE_ON(message)) NtUserMessageCall( hwnd, msg, wparam, lparam, 0, FNID_SPYENTER, flag );
+    if (TRACE_ON(message)) NtUserMessageCall( hwnd, msg, wparam, lparam, 0, NtUserSpyEnter, flag );
 }
 
 void SPY_ExitMessage( INT flag, HWND hwnd, UINT msg, LRESULT lreturn, WPARAM wparam, LPARAM lparam )
 {
-    if (TRACE_ON(message)) NtUserMessageCall( hwnd, msg, wparam, lparam, lreturn, FNID_SPYEXIT, flag );
+    if (TRACE_ON(message)) NtUserMessageCall( hwnd, msg, wparam, lparam, (void *)lreturn,
+                                              NtUserSpyExit, flag );
 }

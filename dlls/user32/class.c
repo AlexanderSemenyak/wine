@@ -493,7 +493,7 @@ BOOL WINAPI UnregisterClassW( LPCWSTR className, HINSTANCE hInstance )
  */
 WORD WINAPI GetClassWord( HWND hwnd, INT offset )
 {
-    return NtUserCallHwndParam( hwnd, offset, NtUserGetClassWord );
+    return NtUserGetClassWord( hwnd, offset );
 }
 
 
@@ -502,7 +502,7 @@ WORD WINAPI GetClassWord( HWND hwnd, INT offset )
  */
 DWORD WINAPI GetClassLongW( HWND hwnd, INT offset )
 {
-    return NtUserCallHwndParam( hwnd, offset, NtUserGetClassLongW );
+    return NtUserGetClassLongW( hwnd, offset );
 }
 
 
@@ -512,7 +512,7 @@ DWORD WINAPI GetClassLongW( HWND hwnd, INT offset )
  */
 DWORD WINAPI GetClassLongA( HWND hwnd, INT offset )
 {
-    return NtUserCallHwndParam( hwnd, offset, NtUserGetClassLongA );
+    return NtUserGetClassLongA( hwnd, offset );
 }
 
 
@@ -763,30 +763,21 @@ BOOL16 WINAPI ClassNext16( CLASSENTRY *pClassEntry )
 }
 #endif
 
+#ifdef _WIN64
+
 /* 64bit versions */
 
-#ifdef GetClassLongPtrA
 #undef GetClassLongPtrA
-#endif
-
-#ifdef GetClassLongPtrW
 #undef GetClassLongPtrW
-#endif
-
-#ifdef SetClassLongPtrA
 #undef SetClassLongPtrA
-#endif
-
-#ifdef SetClassLongPtrW
 #undef SetClassLongPtrW
-#endif
 
 /***********************************************************************
  *		GetClassLongPtrA (USER32.@)
  */
 ULONG_PTR WINAPI GetClassLongPtrA( HWND hwnd, INT offset )
 {
-    return NtUserCallHwndParam( hwnd, offset, NtUserGetClassLongPtrA );
+    return NtUserGetClassLongPtrA( hwnd, offset );
 }
 
 /***********************************************************************
@@ -794,7 +785,7 @@ ULONG_PTR WINAPI GetClassLongPtrA( HWND hwnd, INT offset )
  */
 ULONG_PTR WINAPI GetClassLongPtrW( HWND hwnd, INT offset )
 {
-    return NtUserCallHwndParam( hwnd, offset, NtUserGetClassLongPtrW );
+    return NtUserGetClassLongPtrW( hwnd, offset );
 }
 
 /***********************************************************************
@@ -814,3 +805,5 @@ ULONG_PTR WINAPI SetClassLongPtrA( HWND hwnd, INT offset, LONG_PTR newval )
     if (offset == GCLP_MENUNAME) return set_menu_nameA( hwnd, offset, newval );
     return NtUserSetClassLongPtr( hwnd, offset, newval, TRUE );
 }
+
+#endif /* _WIN64 */

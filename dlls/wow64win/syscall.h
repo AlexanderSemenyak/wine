@@ -57,7 +57,9 @@
     SYSCALL_ENTRY( NtGdiGetBitmapBits ) \
     SYSCALL_ENTRY( NtGdiGetBitmapDimension ) \
     SYSCALL_ENTRY( NtGdiGetColorAdjustment ) \
+    SYSCALL_ENTRY( NtGdiGetDCDword ) \
     SYSCALL_ENTRY( NtGdiGetDCObject ) \
+    SYSCALL_ENTRY( NtGdiGetDCPoint ) \
     SYSCALL_ENTRY( NtGdiGetFontFileData ) \
     SYSCALL_ENTRY( NtGdiGetFontFileInfo ) \
     SYSCALL_ENTRY( NtGdiGetNearestPaletteIndex ) \
@@ -91,6 +93,8 @@
     SYSCALL_ENTRY( NtUserAddClipboardFormatListener ) \
     SYSCALL_ENTRY( NtUserAttachThreadInput ) \
     SYSCALL_ENTRY( NtUserBuildHwndList ) \
+    SYSCALL_ENTRY( NtUserCheckMenuItem ) \
+    SYSCALL_ENTRY( NtUserChildWindowFromPointEx ) \
     SYSCALL_ENTRY( NtUserCloseDesktop ) \
     SYSCALL_ENTRY( NtUserCloseWindowStation ) \
     SYSCALL_ENTRY( NtUserCopyAcceleratorTable ) \
