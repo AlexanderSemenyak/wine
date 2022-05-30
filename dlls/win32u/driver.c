@@ -215,7 +215,7 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
             dc = get_nulldrv_dc( dev );
             memset( &devmode, 0, sizeof(devmode) );
             devmode.dmSize = sizeof(devmode);
-            init_unicode_string( &display, dc->display );
+            RtlInitUnicodeString( &display, dc->display );
             if (NtUserEnumDisplaySettings( &display, ENUM_CURRENT_SETTINGS, &devmode, 0 ) &&
                 (devmode.dmFields & DM_BITSPERPEL) && devmode.dmBitsPerPel)
                 return devmode.dmBitsPerPel;
@@ -267,7 +267,7 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
 
         memset( &devmode, 0, sizeof(devmode) );
         devmode.dmSize = sizeof(devmode);
-        init_unicode_string( &display, dc->display );
+        RtlInitUnicodeString( &display, dc->display );
         if (NtUserEnumDisplaySettings( &display, ENUM_CURRENT_SETTINGS, &devmode, 0 ) &&
             devmode.dmDisplayFrequency)
             return devmode.dmDisplayFrequency;
@@ -294,7 +294,8 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
     case LOGPIXELSY:      return get_system_dpi();
     case NUMCOLORS:
         bpp = NtGdiGetDeviceCaps( dev->hdc, BITSPIXEL );
-        return (bpp > 8) ? -1 : (1 << bpp);
+        /* Newer versions of Windows return -1 for 8-bit and higher */
+        return (bpp > 4) ? -1 : (1 << bpp);
     case COLORRES:
         /* The observed correspondence between BITSPIXEL and COLORRES is:
          * BITSPIXEL: 8  -> COLORRES: 18
@@ -549,6 +550,21 @@ static NTSTATUS CDECL nulldrv_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_C
     return STATUS_PROCEDURE_NOT_FOUND;
 }
 
+static NTSTATUS CDECL nulldrv_D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
+{
+    return STATUS_PROCEDURE_NOT_FOUND;
+}
+
+static NTSTATUS CDECL nulldrv_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc )
+{
+    return STATUS_PROCEDURE_NOT_FOUND;
+}
+
+static NTSTATUS CDECL nulldrv_D3DKMTQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc )
+{
+    return STATUS_PROCEDURE_NOT_FOUND;
+}
+
 static NTSTATUS CDECL nulldrv_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc )
 {
     return STATUS_PROCEDURE_NOT_FOUND;
@@ -646,6 +662,9 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_StrokePath,                 /* pStrokePath */
     nulldrv_UnrealizePalette,           /* pUnrealizePalette */
     nulldrv_D3DKMTCheckVidPnExclusiveOwnership, /* pD3DKMTCheckVidPnExclusiveOwnership */
+    nulldrv_D3DKMTCloseAdapter,         /* pD3DKMTCloseAdapter */
+    nulldrv_D3DKMTOpenAdapterFromLuid,  /* pD3DKMTOpenAdapterFromLuid */
+    nulldrv_D3DKMTQueryVideoMemoryInfo, /* pD3DKMTQueryVideoMemoryInfo */
     nulldrv_D3DKMTSetVidPnSourceOwner,  /* pD3DKMTSetVidPnSourceOwner */
 
     GDI_PRIORITY_NULL_DRV               /* priority */
@@ -700,6 +719,11 @@ static void nulldrv_UnregisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
 static SHORT nulldrv_VkKeyScanEx( WCHAR ch, HKL layout )
 {
     return -256; /* use default implementation */
+}
+
+static LRESULT nulldrv_DesktopWindowProc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    return default_window_proc( hwnd, msg, wparam, lparam, FALSE );
 }
 
 static void nulldrv_DestroyCursorIcon( HCURSOR cursor )
@@ -757,7 +781,7 @@ static BOOL nodrv_CreateWindow( HWND hwnd )
     HWND parent = NtUserGetAncestor( hwnd, GA_PARENT );
 
     /* HWND_MESSAGE windows don't need a graphics driver */
-    if (!parent || parent == get_user_thread_info()->msg_window) return TRUE;
+    if (!parent || parent == NtUserGetThreadInfo()->msg_window) return TRUE;
     if (warned++) return FALSE;
 
     ERR_(winediag)( "Application tried to create a window, but no driver could be loaded.\n" );
@@ -783,50 +807,14 @@ static void nulldrv_GetDC( HDC hdc, HWND hwnd, HWND top_win, const RECT *win_rec
 {
 }
 
-/* helper for kernel32->ntdll timeout format conversion */
-static inline LARGE_INTEGER *get_nt_timeout( LARGE_INTEGER *time, DWORD timeout )
+static NTSTATUS nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
+                                                     const LARGE_INTEGER *timeout,
+                                                     DWORD mask, DWORD flags )
 {
-    if (timeout == INFINITE) return NULL;
-    time->QuadPart = (ULONGLONG)timeout * -10000;
-    return time;
-}
+    if (!count && timeout && !timeout->QuadPart) return WAIT_TIMEOUT;
 
-static HANDLE normalize_std_handle( HANDLE handle )
-{
-    if (handle == (HANDLE)STD_INPUT_HANDLE)
-        return NtCurrentTeb()->Peb->ProcessParameters->hStdInput;
-    if (handle == (HANDLE)STD_OUTPUT_HANDLE)
-        return NtCurrentTeb()->Peb->ProcessParameters->hStdOutput;
-    if (handle == (HANDLE)STD_ERROR_HANDLE)
-        return NtCurrentTeb()->Peb->ProcessParameters->hStdError;
-
-    return handle;
-}
-
-static DWORD nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
-                                                  DWORD mask, DWORD flags )
-{
-    NTSTATUS status;
-    HANDLE hloc[MAXIMUM_WAIT_OBJECTS];
-    LARGE_INTEGER time;
-    unsigned int i;
-
-    if (!count && !timeout) return WAIT_TIMEOUT;
-    if (count > MAXIMUM_WAIT_OBJECTS)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return WAIT_FAILED;
-    }
-    for (i = 0; i < count; i++) hloc[i] = normalize_std_handle( handles[i] );
-
-    status = NtWaitForMultipleObjects( count, hloc, !(flags & MWMO_WAITALL), !!(flags & MWMO_ALERTABLE),
-                                       get_nt_timeout( &time, timeout ) );
-    if (HIWORD(status))  /* is it an error code? */
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        status = WAIT_FAILED;
-    }
-    return status;
+    return NtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
+                                     !!(flags & MWMO_ALERTABLE), timeout );
 }
 
 static void nulldrv_ReleaseDC( HWND hwnd, HDC hdc )
@@ -1192,6 +1180,7 @@ static const struct user_driver_funcs lazy_load_driver =
     /* windowing functions */
     loaderdrv_CreateDesktopWindow,
     loaderdrv_CreateWindow,
+    nulldrv_DesktopWindowProc,
     nulldrv_DestroyWindow,
     loaderdrv_FlashWindowEx,
     loaderdrv_GetDC,
@@ -1264,6 +1253,7 @@ void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT v
     SET_USER_FUNC(UpdateDisplayDevices);
     SET_USER_FUNC(CreateDesktopWindow);
     SET_USER_FUNC(CreateWindow);
+    SET_USER_FUNC(DesktopWindowProc);
     SET_USER_FUNC(DestroyWindow);
     SET_USER_FUNC(FlashWindowEx);
     SET_USER_FUNC(GetDC);
@@ -1351,6 +1341,9 @@ NTSTATUS WINAPI NtGdiDdDDICloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
     if (!desc || !desc->hAdapter)
         return STATUS_INVALID_PARAMETER;
 
+    if (get_display_driver()->pD3DKMTCloseAdapter)
+        get_display_driver()->pD3DKMTCloseAdapter( desc );
+
     pthread_mutex_lock( &driver_lock );
     LIST_FOR_EACH_ENTRY( adapter, &d3dkmt_adapters, struct d3dkmt_adapter, entry )
     {
@@ -1401,6 +1394,10 @@ NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc 
     desc->hAdapter = adapter->handle = ++handle_start;
     list_add_tail( &d3dkmt_adapters, &adapter->entry );
     pthread_mutex_unlock( &driver_lock );
+
+    if (get_display_driver()->pD3DKMTOpenAdapterFromLuid)
+        get_display_driver()->pD3DKMTOpenAdapterFromLuid( desc );
+
     return STATUS_SUCCESS;
 }
 
@@ -1489,6 +1486,37 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
 {
     FIXME("(%p): stub\n", stats);
     return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ *           NtGdiDdDDIQueryVideoMemoryInfo    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDIQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc )
+{
+    OBJECT_BASIC_INFORMATION info;
+    NTSTATUS status;
+
+    TRACE("(%p)\n", desc);
+
+    if (!desc || !desc->hAdapter ||
+        (desc->MemorySegmentGroup != D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL &&
+         desc->MemorySegmentGroup != D3DKMT_MEMORY_SEGMENT_GROUP_NON_LOCAL))
+        return STATUS_INVALID_PARAMETER;
+
+    /* FIXME: Wine currently doesn't support linked adapters */
+    if (desc->PhysicalAdapterIndex > 0)
+        return STATUS_INVALID_PARAMETER;
+
+    status = NtQueryObject(desc->hProcess ? desc->hProcess : GetCurrentProcess(),
+                           ObjectBasicInformation, &info, sizeof(info), NULL);
+    if (status != STATUS_SUCCESS)
+        return status;
+    if (!(info.GrantedAccess & PROCESS_QUERY_INFORMATION))
+        return STATUS_ACCESS_DENIED;
+
+    if (!get_display_driver()->pD3DKMTQueryVideoMemoryInfo)
+        return STATUS_PROCEDURE_NOT_FOUND;
+    return get_display_driver()->pD3DKMTQueryVideoMemoryInfo(desc);
 }
 
 /******************************************************************************

@@ -30,7 +30,7 @@
 #include "macdrv_cocoa.h"
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
+#include "ntgdi.h"
 #include "wine/debug.h"
 #include "wine/gdi_driver.h"
 
@@ -114,13 +114,11 @@ struct macdrv_thread_data
     WORD                        keyc2scan[128];
 };
 
-extern DWORD thread_data_tls_index DECLSPEC_HIDDEN;
-
 extern struct macdrv_thread_data *macdrv_init_thread_data(void) DECLSPEC_HIDDEN;
 
 static inline struct macdrv_thread_data *macdrv_thread_data(void)
 {
-    return TlsGetValue(thread_data_tls_index);
+    return NtUserGetThreadInfo()->driver_data;
 }
 
 
@@ -137,6 +135,7 @@ extern BOOL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp) DECLSPEC_HIDDEN;
 extern BOOL macdrv_ClipCursor(LPCRECT clip) DECLSPEC_HIDDEN;
 extern BOOL macdrv_CreateDesktopWindow(HWND hwnd) DECLSPEC_HIDDEN;
 extern BOOL macdrv_CreateWindow(HWND hwnd) DECLSPEC_HIDDEN;
+extern LRESULT macdrv_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) DECLSPEC_HIDDEN;
 extern void macdrv_DestroyWindow(HWND hwnd) DECLSPEC_HIDDEN;
 extern void macdrv_SetFocus(HWND hwnd) DECLSPEC_HIDDEN;
 extern void macdrv_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha,
@@ -173,8 +172,9 @@ extern UINT macdrv_GetKeyboardLayoutList(INT size, HKL *list) DECLSPEC_HIDDEN;
 extern INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size) DECLSPEC_HIDDEN;
 extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_param,
                                         UINT flags) DECLSPEC_HIDDEN;
-extern DWORD macdrv_MsgWaitForMultipleObjectsEx(DWORD count, const HANDLE *handles,
-                                                DWORD timeout, DWORD mask, DWORD flags) DECLSPEC_HIDDEN;
+extern NTSTATUS macdrv_MsgWaitForMultipleObjectsEx(DWORD count, const HANDLE *handles,
+                                                   const LARGE_INTEGER *timeout, DWORD mask,
+                                                   DWORD flags) DECLSPEC_HIDDEN;
 extern void macdrv_ThreadDetach(void) DECLSPEC_HIDDEN;
 
 
@@ -204,6 +204,7 @@ struct macdrv_win_data
 
 extern struct macdrv_win_data *get_win_data(HWND hwnd) DECLSPEC_HIDDEN;
 extern void release_win_data(struct macdrv_win_data *data) DECLSPEC_HIDDEN;
+extern void init_win_context(void) DECLSPEC_HIDDEN;
 extern macdrv_window macdrv_get_cocoa_window(HWND hwnd, BOOL require_on_screen) DECLSPEC_HIDDEN;
 extern RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp) DECLSPEC_HIDDEN;
 extern void activate_on_following_focus(void) DECLSPEC_HIDDEN;
@@ -291,5 +292,83 @@ extern void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const B
 extern void macdrv_im_set_text(const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_sent_text_input(const macdrv_event *event) DECLSPEC_HIDDEN;
 extern BOOL query_ime_char_rect(macdrv_query* query) DECLSPEC_HIDDEN;
+
+/* user helpers */
+
+static inline LRESULT send_message(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    return NtUserMessageCall(hwnd, msg, wparam, lparam, NULL, NtUserSendMessage, FALSE);
+}
+
+static inline LRESULT send_message_timeout(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                                           UINT flags, UINT timeout, PDWORD_PTR res_ptr)
+{
+    struct send_message_timeout_params params = { .flags = flags, .timeout = timeout };
+    LRESULT res = NtUserMessageCall(hwnd, msg, wparam, lparam, &params,
+                                    NtUserSendMessageTimeout, FALSE);
+    if (res_ptr) *res_ptr = params.result;
+    return res;
+}
+
+static inline HWND get_active_window(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo(GetCurrentThreadId(), &info) ? info.hwndActive : 0;
+}
+
+static inline HWND get_capture(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo(GetCurrentThreadId(), &info) ? info.hwndCapture : 0;
+}
+
+static inline HWND get_focus(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo(GetCurrentThreadId(), &info) ? info.hwndFocus : 0;
+}
+
+static inline BOOL intersect_rect( RECT *dst, const RECT *src1, const RECT *src2 )
+{
+    dst->left   = max(src1->left, src2->left);
+    dst->top    = max(src1->top, src2->top);
+    dst->right  = min(src1->right, src2->right);
+    dst->bottom = min(src1->bottom, src2->bottom);
+    return !IsRectEmpty( dst );
+}
+
+/* registry helpers */
+
+extern HKEY open_hkcu_key( const char *name ) DECLSPEC_HIDDEN;
+extern ULONG query_reg_value(HKEY hkey, const WCHAR *name, KEY_VALUE_PARTIAL_INFORMATION *info,
+                             ULONG size) DECLSPEC_HIDDEN;
+extern HKEY reg_create_ascii_key(HKEY root, const char *name, DWORD options,
+                                 DWORD *disposition) DECLSPEC_HIDDEN;
+extern HKEY reg_create_key(HKEY root, const WCHAR *name, ULONG name_len,
+                           DWORD options, DWORD *disposition) DECLSPEC_HIDDEN;
+extern BOOL reg_delete_tree(HKEY parent, const WCHAR *name, ULONG name_len) DECLSPEC_HIDDEN;
+extern HKEY reg_open_key(HKEY root, const WCHAR *name, ULONG name_len) DECLSPEC_HIDDEN;
+
+/* string helpers */
+
+static inline void ascii_to_unicode(WCHAR *dst, const char *src, size_t len)
+{
+    while (len--) *dst++ = (unsigned char)*src++;
+}
+
+static inline UINT asciiz_to_unicode(WCHAR *dst, const char *src)
+{
+    WCHAR *p = dst;
+    while ((*p++ = *src++));
+    return (p - dst) * sizeof(WCHAR);
+}
+
+/* FIXME: remove once we use unixlib */
+#define wcsnicmp strncmpiW
+#define wcsrchr strrchrW
+#define wcstol strtolW
 
 #endif  /* __WINE_MACDRV_H */

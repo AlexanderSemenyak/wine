@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 #include "x11drv.h"
 #include "wine/debug.h"
@@ -29,17 +33,21 @@ struct x11drv_display_device_handler desktop_handler;
 
 HANDLE get_display_device_init_mutex(void)
 {
-    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
-    HANDLE mutex = CreateMutexW(NULL, FALSE, init_mutexW);
+    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t'};
+    UNICODE_STRING name = { sizeof(init_mutexW), sizeof(init_mutexW), (WCHAR *)init_mutexW };
+    OBJECT_ATTRIBUTES attr;
+    HANDLE mutex = 0;
 
-    WaitForSingleObject(mutex, INFINITE);
+    InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
+    NtCreateMutant( &mutex, MUTEX_ALL_ACCESS, &attr, FALSE );
+    if (mutex) NtWaitForSingleObject( mutex, FALSE, NULL );
     return mutex;
 }
 
 void release_display_device_init_mutex(HANDLE mutex)
 {
-    ReleaseMutex(mutex);
-    CloseHandle(mutex);
+    NtReleaseMutant( mutex, NULL );
+    NtClose( mutex );
 }
 
 POINT virtual_screen_to_root(INT x, INT y)
@@ -120,7 +128,7 @@ RECT get_work_area(const RECT *monitor_rect)
                 work_rect.right = work_rect.left + work_area[i * 4 + 2];
                 work_rect.bottom = work_rect.top + work_area[i * 4 + 3];
 
-                if (IntersectRect(&work_rect, &work_rect, monitor_rect))
+                if (intersect_rect( &work_rect, &work_rect, monitor_rect ))
                 {
                     TRACE("work_rect:%s.\n", wine_dbgstr_rect(&work_rect));
                     XFree(work_area);
@@ -142,7 +150,7 @@ RECT get_work_area(const RECT *monitor_rect)
             SetRect(&work_rect, work_area[0], work_area[1], work_area[0] + work_area[2],
                     work_area[1] + work_area[3]);
 
-            if (IntersectRect(&work_rect, &work_rect, monitor_rect))
+            if (intersect_rect( &work_rect, &work_rect, monitor_rect ))
             {
                 TRACE("work_rect:%s.\n", wine_dbgstr_rect(&work_rect));
                 XFree(work_area);
@@ -174,35 +182,13 @@ void X11DRV_DisplayDevices_RegisterEventHandlers(void)
         handler->register_event_handlers();
 }
 
-static BOOL CALLBACK update_windows_on_display_change(HWND hwnd, LPARAM lparam)
-{
-    struct x11drv_win_data *data;
-    UINT mask = (UINT)lparam;
-
-    if (!(data = get_win_data(hwnd)))
-        return TRUE;
-
-    /* update the full screen state */
-    update_net_wm_states(data);
-
-    if (mask && data->whole_window)
-    {
-        POINT pos = virtual_screen_to_root(data->whole_rect.left, data->whole_rect.top);
-        XWindowChanges changes;
-        changes.x = pos.x;
-        changes.y = pos.y;
-        XReconfigureWMWindow(data->display, data->whole_window, data->vis.screen, mask, &changes);
-    }
-    release_win_data(data);
-    return TRUE;
-}
-
 void X11DRV_DisplayDevices_Update(BOOL send_display_change)
 {
     RECT old_virtual_rect, new_virtual_rect;
     DWORD tid, pid;
     HWND foreground;
-    UINT mask = 0;
+    UINT mask = 0, i;
+    HWND *list;
 
     old_virtual_rect = NtUserGetVirtualScreenRect();
     X11DRV_DisplayDevices_Init(TRUE);
@@ -215,7 +201,29 @@ void X11DRV_DisplayDevices_Update(BOOL send_display_change)
         mask |= CWY;
 
     X11DRV_resize_desktop(send_display_change);
-    EnumWindows(update_windows_on_display_change, (LPARAM)mask);
+
+    list = build_hwnd_list();
+    for (i = 0; list && list[i] != HWND_BOTTOM; i++)
+    {
+        struct x11drv_win_data *data;
+
+        if (!(data = get_win_data( list[i] ))) continue;
+
+        /* update the full screen state */
+        update_net_wm_states(data);
+
+        if (mask && data->whole_window)
+        {
+            POINT pos = virtual_screen_to_root(data->whole_rect.left, data->whole_rect.top);
+            XWindowChanges changes;
+            changes.x = pos.x;
+            changes.y = pos.y;
+            XReconfigureWMWindow(data->display, data->whole_window, data->vis.screen, mask, &changes);
+        }
+        release_win_data(data);
+    }
+
+    free( list );
 
     /* forward clip_fullscreen_window request to the foreground window */
     if ((foreground = NtUserGetForegroundWindow()) &&

@@ -18,27 +18,7 @@
 
 #include "mmdeviceapi.h"
 
-struct oss_stream
-{
-    WAVEFORMATEX *fmt;
-    EDataFlow flow;
-    UINT flags;
-    AUDCLNT_SHAREMODE share;
-    HANDLE event;
-
-    int fd;
-
-    BOOL playing, mute, please_quit;
-    UINT64 written_frames, last_pos_frames;
-    UINT32 period_frames, bufsize_frames, held_frames, tmp_buffer_frames, in_oss_frames;
-    UINT32 oss_bufsize_bytes, lcl_offs_frames; /* offs into local_buffer where valid data starts */
-    REFERENCE_TIME period;
-
-    BYTE *local_buffer, *tmp_buffer;
-    INT32 getbuf_last; /* <0 when using tmp_buffer */
-
-    pthread_mutex_t lock;
-};
+typedef UINT64 stream_handle;
 
 /* From <dlls/mmdevapi/mmdevapi.h> */
 enum DriverPriority
@@ -56,8 +36,8 @@ struct test_connect_params
 
 struct endpoint
 {
-    WCHAR *name;
-    char *device;
+    unsigned int name;
+    unsigned int device;
 };
 
 struct get_endpoint_ids_params
@@ -80,42 +60,42 @@ struct create_stream_params
     REFERENCE_TIME period;
     const WAVEFORMATEX *fmt;
     HRESULT result;
-    struct oss_stream **stream;
+    stream_handle *stream;
 };
 
 struct release_stream_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HANDLE timer_thread;
     HRESULT result;
 };
 
 struct start_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
 };
 
 struct stop_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
 };
 
 struct reset_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
 };
 
 struct timer_loop_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
 };
 
 struct get_render_buffer_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     UINT32 frames;
     HRESULT result;
     BYTE **data;
@@ -123,7 +103,7 @@ struct get_render_buffer_params
 
 struct release_render_buffer_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     UINT32 written_frames;
     UINT flags;
     HRESULT result;
@@ -131,7 +111,7 @@ struct release_render_buffer_params
 
 struct get_capture_buffer_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     BYTE **data;
     UINT32 *frames;
@@ -142,7 +122,7 @@ struct get_capture_buffer_params
 
 struct release_capture_buffer_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     UINT32 done;
     HRESULT result;
 };
@@ -167,30 +147,117 @@ struct get_mix_format_params
 
 struct get_buffer_size_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     UINT32 *size;
 };
 
 struct get_latency_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     REFERENCE_TIME *latency;
 };
 
 struct get_current_padding_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     UINT32 *padding;
 };
 
+struct get_next_packet_size_params
+{
+    stream_handle stream;
+    HRESULT result;
+    UINT32 *frames;
+};
+
+struct get_frequency_params
+{
+    stream_handle stream;
+    HRESULT result;
+    UINT64 *frequency;
+};
+
+struct get_position_params
+{
+    stream_handle stream;
+    HRESULT result;
+    UINT64 *position;
+    UINT64 *qpctime;
+};
+
+struct set_volumes_params
+{
+    stream_handle stream;
+    float master_volume;
+    const float *volumes;
+    const float *session_volumes;
+};
+
 struct set_event_handle_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HANDLE event;
     HRESULT result;
+};
+
+struct is_started_params
+{
+    stream_handle stream;
+    HRESULT result;
+};
+
+struct notify_context
+{
+    BOOL send_notify;
+    WORD dev_id;
+    WORD msg;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT_PTR callback;
+    UINT flags;
+    HANDLE device;
+    UINT_PTR instance;
+};
+
+struct midi_out_message_params
+{
+    UINT dev_id;
+    UINT msg;
+    UINT_PTR user;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT *err;
+    struct notify_context *notify;
+};
+
+struct midi_in_message_params
+{
+    UINT dev_id;
+    UINT msg;
+    UINT_PTR user;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT *err;
+    struct notify_context *notify;
+};
+
+struct midi_notify_wait_params
+{
+    BOOL *quit;
+    struct notify_context *notify;
+};
+
+struct aux_message_params
+{
+    UINT dev_id;
+    UINT msg;
+    UINT_PTR user;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT *err;
 };
 
 enum oss_funcs
@@ -212,8 +279,29 @@ enum oss_funcs
     oss_get_buffer_size,
     oss_get_latency,
     oss_get_current_padding,
+    oss_get_next_packet_size,
+    oss_get_frequency,
+    oss_get_position,
+    oss_set_volumes,
     oss_set_event_handle,
+    oss_is_started,
+    oss_midi_release,
+    oss_midi_out_message,
+    oss_midi_in_message,
+    oss_midi_notify_wait,
+    oss_aux_message,
 };
+
+NTSTATUS midi_release(void *args) DECLSPEC_HIDDEN;
+NTSTATUS midi_out_message(void *args) DECLSPEC_HIDDEN;
+NTSTATUS midi_in_message(void *args) DECLSPEC_HIDDEN;
+NTSTATUS midi_notify_wait(void *args) DECLSPEC_HIDDEN;
+
+#ifdef _WIN64
+NTSTATUS wow64_midi_out_message(void *args) DECLSPEC_HIDDEN;
+NTSTATUS wow64_midi_in_message(void *args) DECLSPEC_HIDDEN;
+NTSTATUS wow64_midi_notify_wait(void *args) DECLSPEC_HIDDEN;
+#endif
 
 extern unixlib_handle_t oss_handle;
 

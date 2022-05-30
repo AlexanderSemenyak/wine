@@ -153,13 +153,15 @@ DEFINE_EXPECT(GetTypeInfo);
 #define DISPID_EXTERNAL_WRITESTREAM    0x300006
 #define DISPID_EXTERNAL_GETVT          0x300007
 #define DISPID_EXTERNAL_NULL_DISP      0x300008
+#define DISPID_EXTERNAL_IS_ENGLISH     0x300009
+#define DISPID_EXTERNAL_LIST_SEP       0x30000A
 
 static const GUID CLSID_TestScript =
     {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x07,0x46}};
 static const GUID CLSID_TestActiveX =
     {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x06,0x46}};
 
-static BOOL is_ie9plus;
+static BOOL is_ie9plus, is_english;
 static IHTMLDocument2 *notif_doc;
 static IOleDocumentView *view;
 static IDispatchEx *window_dispex;
@@ -599,6 +601,14 @@ static HRESULT WINAPI externalDisp_GetDispID(IDispatchEx *iface, BSTR bstrName, 
         *pid = DISPID_EXTERNAL_NULL_DISP;
         return S_OK;
     }
+    if(!lstrcmpW(bstrName, L"isEnglish")) {
+        *pid = DISPID_EXTERNAL_IS_ENGLISH;
+        return S_OK;
+    }
+    if(!lstrcmpW(bstrName, L"listSeparator")) {
+        *pid = DISPID_EXTERNAL_LIST_SEP;
+        return S_OK;
+    }
 
     ok(0, "unexpected name %s\n", wine_dbgstr_w(bstrName));
     return DISP_E_UNKNOWNNAME;
@@ -783,6 +793,45 @@ static HRESULT WINAPI externalDisp_InvokeEx(IDispatchEx *iface, DISPID id, LCID 
         V_VT(pvarRes) = VT_DISPATCH;
         V_DISPATCH(pvarRes) = NULL;
         return S_OK;
+
+    case DISPID_EXTERNAL_IS_ENGLISH:
+        ok(wFlags == INVOKE_PROPERTYGET, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(!pdp->rgvarg, "rgvarg != NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pdp->cArgs, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(V_VT(pvarRes) == VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+        ok(pei != NULL, "pei == NULL\n");
+
+        V_VT(pvarRes) = VT_BOOL;
+        V_BOOL(pvarRes) = is_english ? VARIANT_TRUE : VARIANT_FALSE;
+        return S_OK;
+
+    case DISPID_EXTERNAL_LIST_SEP: {
+        WCHAR buf[4];
+        int len;
+
+        ok(wFlags == INVOKE_PROPERTYGET, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(!pdp->rgvarg, "rgvarg != NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pdp->cArgs, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(V_VT(pvarRes) == VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+        ok(pei != NULL, "pei == NULL\n");
+
+        if(!(len = GetLocaleInfoW(GetUserDefaultLCID(), LOCALE_SLIST, buf, ARRAY_SIZE(buf))))
+            buf[len++] = ',';
+        else
+            len--;
+
+        V_VT(pvarRes) = VT_BSTR;
+        V_BSTR(pvarRes) = SysAllocStringLen(buf, len);
+        return S_OK;
+    }
 
     default:
         ok(0, "unexpected call\n");
@@ -2997,10 +3046,22 @@ typedef struct {
     IStream *stream;
     char *data;
     ULONG size;
+    LONG delay;
     char *ptr;
 
     IUri *uri;
 } ProtocolHandler;
+
+static DWORD WINAPI delay_proc(void *arg)
+{
+    PROTOCOLDATA protocol_data = {PI_FORCE_ASYNC};
+    ProtocolHandler *protocol_handler = arg;
+
+    Sleep(protocol_handler->delay);
+    protocol_handler->delay = -1;
+    IInternetProtocolSink_Switch(protocol_handler->sink, &protocol_data);
+    return 0;
+}
 
 static void report_data(ProtocolHandler *This)
 {
@@ -3012,27 +3073,36 @@ static void report_data(ProtocolHandler *This)
 
     static const WCHAR emptyW[] = {0};
 
-    hres = IInternetProtocolSink_QueryInterface(This->sink, &IID_IServiceProvider, (void**)&service_provider);
-    ok(hres == S_OK, "Could not get IServiceProvider iface: %08lx\n", hres);
+    if(This->delay >= 0) {
+        hres = IInternetProtocolSink_QueryInterface(This->sink, &IID_IServiceProvider, (void**)&service_provider);
+        ok(hres == S_OK, "Could not get IServiceProvider iface: %08lx\n", hres);
 
-    hres = IServiceProvider_QueryService(service_provider, &IID_IHttpNegotiate, &IID_IHttpNegotiate, (void**)&http_negotiate);
-    IServiceProvider_Release(service_provider);
-    ok(hres == S_OK, "Could not get IHttpNegotiate interface: %08lx\n", hres);
+        hres = IServiceProvider_QueryService(service_provider, &IID_IHttpNegotiate, &IID_IHttpNegotiate, (void**)&http_negotiate);
+        IServiceProvider_Release(service_provider);
+        ok(hres == S_OK, "Could not get IHttpNegotiate interface: %08lx\n", hres);
 
-    hres = IUri_GetDisplayUri(This->uri, &url);
-    ok(hres == S_OK, "Failed to get display uri: %08lx\n", hres);
-    hres = IHttpNegotiate_BeginningTransaction(http_negotiate, url, emptyW, 0, &addl_headers);
-    ok(hres == S_OK, "BeginningTransaction failed: %08lx\n", hres);
-    SysFreeString(url);
+        hres = IUri_GetDisplayUri(This->uri, &url);
+        ok(hres == S_OK, "Failed to get display uri: %08lx\n", hres);
+        hres = IHttpNegotiate_BeginningTransaction(http_negotiate, url, emptyW, 0, &addl_headers);
+        ok(hres == S_OK, "BeginningTransaction failed: %08lx\n", hres);
+        SysFreeString(url);
 
-    CoTaskMemFree(addl_headers);
+        CoTaskMemFree(addl_headers);
 
-    headers = SysAllocString(L"HTTP/1.1 200 OK\r\n\r\n");
-    hres = IHttpNegotiate_OnResponse(http_negotiate, 200, headers, NULL, NULL);
-    ok(hres == S_OK, "OnResponse failed: %08lx\n", hres);
-    SysFreeString(headers);
+        headers = SysAllocString(L"HTTP/1.1 200 OK\r\n\r\n");
+        hres = IHttpNegotiate_OnResponse(http_negotiate, 200, headers, NULL, NULL);
+        ok(hres == S_OK, "OnResponse failed: %08lx\n", hres);
+        SysFreeString(headers);
 
-    IHttpNegotiate_Release(http_negotiate);
+        IHttpNegotiate_Release(http_negotiate);
+
+        if(This->delay) {
+            IInternetProtocolEx_AddRef(&This->IInternetProtocolEx_iface);
+            QueueUserWorkItem(delay_proc, This, 0);
+            return;
+        }
+    }
+    This->delay = 0;
 
     hres = IInternetProtocolSink_ReportData(This->sink, BSCF_FIRSTDATANOTIFICATION | BSCF_LASTDATANOTIFICATION,
                                             This->size, This->size);
@@ -3201,6 +3271,12 @@ static HRESULT WINAPI Protocol_Continue(IInternetProtocolEx *iface, PROTOCOLDATA
 
 static HRESULT WINAPI Protocol_Abort(IInternetProtocolEx *iface, HRESULT hrReason, DWORD dwOptions)
 {
+    ProtocolHandler *This = impl_from_IInternetProtocolEx(iface);
+    if(This->delay > 0) {
+        ok(hrReason == E_ABORT, "Abort hrReason = %08lx\n", hrReason);
+        ok(dwOptions == 0, "Abort dwOptions = %lx\n", dwOptions);
+        return S_OK;
+    }
     trace("Abort(%08lx %lx)\n", hrReason, dwOptions);
     return E_NOTIMPL;
 }
@@ -3273,8 +3349,8 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
 {
     ProtocolHandler *This = impl_from_IInternetProtocolEx(iface);
     BOOL block = FALSE;
+    BSTR path, query;
     DWORD bindf;
-    BSTR path;
     HRSRC src;
     HRESULT hres;
 
@@ -3341,6 +3417,13 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
     SysFreeString(path);
     if(FAILED(hres))
         return hres;
+
+    hres = IUri_GetQuery(uri, &query);
+    if(SUCCEEDED(hres)) {
+        if(!lstrcmpW(query, L"?delay"))
+            This->delay = 1000;
+        SysFreeString(query);
+    }
 
     IInternetProtocolSink_AddRef(This->sink = pOIProtSink);
     IUri_AddRef(This->uri = uri);
@@ -3674,6 +3757,7 @@ static void run_js_tests(void)
     init_protocol_handler();
 
     run_script_as_http_with_mode("xhr.js", NULL, "9");
+    run_script_as_http_with_mode("xhr.js", NULL, "10");
     run_script_as_http_with_mode("xhr.js", NULL, "11");
     run_script_as_http_with_mode("dom.js", NULL, "11");
     run_script_as_http_with_mode("es5.js", NULL, "11");
@@ -3743,6 +3827,19 @@ static HWND create_container_window(void)
             300, 300, NULL, NULL, NULL, NULL);
 }
 
+static void detect_locale(void)
+{
+    HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+    LANGID (WINAPI *pGetThreadUILanguage)(void) = (void*)GetProcAddress(kernel32, "GetThreadUILanguage");
+
+    is_english = ((!pGetThreadUILanguage || PRIMARYLANGID(pGetThreadUILanguage()) == LANG_ENGLISH) &&
+                  PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_ENGLISH &&
+                  PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH);
+
+    if(!is_english)
+        skip("Skipping some tests in non-English locale\n");
+}
+
 static BOOL check_ie(void)
 {
     IHTMLDocument2 *doc;
@@ -3779,6 +3876,7 @@ START_TEST(script)
     CoInitialize(NULL);
     container_hwnd = create_container_window();
 
+    detect_locale();
     if(argc > 2) {
         init_protocol_handler();
         run_script_as_http_with_mode(argv[2], NULL, "11");

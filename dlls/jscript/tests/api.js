@@ -1365,6 +1365,11 @@ ok(tmp === "0", "num().toString = " + tmp);
 tmp = (new Number(5.5)).toString(2);
 ok(tmp === "101.1", "num(5.5).toString(2) = " + tmp);
 
+tmp = (new Number(12)).toLocaleString();
+ok(tmp.indexOf(String.fromCharCode(0)) == -1, "invalid null byte");
+tmp = Number.prototype.toLocaleString.call(NaN);
+ok(tmp.indexOf(String.fromCharCode(0)) == -1, "invalid null byte");
+
 tmp = (new Number(3)).toFixed(3);
 ok(tmp === "3.000", "num(3).toFixed(3) = " + tmp);
 tmp = (new Number(3)).toFixed();
@@ -2592,8 +2597,11 @@ testException(function() {date.setTime();}, "E_ARG_NOT_OPT");
 testException(function() {date.setYear();}, "E_ARG_NOT_OPT");
 testException(function() {arr.test();}, "E_NO_PROPERTY");
 testException(function() {[1,2,3].sort(nullDisp);}, "E_JSCRIPT_EXPECTED");
+testException(function() {var o = new Object(); o.length = 1; o[0] = "a"; Array.prototype.toLocaleString.call(o);}, "E_NOT_ARRAY");
 testException(function() {Number.prototype.toString.call(arr);}, "E_NOT_NUM");
 testException(function() {Number.prototype.toFixed.call(arr);}, "E_NOT_NUM");
+testException(function() {Number.prototype.toLocaleString.call(arr);}, "E_NOT_NUM");
+testException(function() {Number.prototype.toLocaleString.call(null);}, "E_NOT_NUM");
 testException(function() {(new Number(3)).toString(1);}, "E_INVALID_CALL_ARG");
 testException(function() {(new Number(3)).toFixed(21);}, "E_FRACTION_DIGITS_OUT_OF_RANGE");
 testException(function() {(new Number(1)).toPrecision(0);}, "E_PRECISION_OUT_OF_RANGE");
@@ -2626,6 +2634,8 @@ testException(function() {null.toString();}, "E_OBJECT_EXPECTED");
 testException(function() {RegExp.prototype.toString.call(new Object());}, "E_REGEXP_EXPECTED");
 testException(function() {/a/.lastIndex();}, "E_NOT_FUNC");
 testException(function() {"a".length();}, "E_NOT_FUNC");
+testException(function() {((function() { var f = Number.prototype.toString; return (function() { return f(); }); })())();}, "E_NOT_NUM");
+testException(function() {((function() { var f = Object.prototype.hasOwnProperty; return (function() { return f("f"); }); })())();}, "E_OBJECT_EXPECTED");
 
 testException(function() { return arguments.callee(); }, "E_STACK_OVERFLOW");
 

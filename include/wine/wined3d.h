@@ -876,6 +876,12 @@ enum wined3d_pipeline
     WINED3D_PIPELINE_COUNT,
 };
 
+enum wined3d_memory_segment_group
+{
+    WINED3D_MEMORY_SEGMENT_GROUP_LOCAL = 0,
+    WINED3D_MEMORY_SEGMENT_GROUP_NON_LOCAL = 1,
+};
+
 #define WINED3DCOLORWRITEENABLE_RED                             (1u << 0)
 #define WINED3DCOLORWRITEENABLE_GREEN                           (1u << 1)
 #define WINED3DCOLORWRITEENABLE_BLUE                            (1u << 2)
@@ -1765,6 +1771,14 @@ struct wined3d_adapter_identifier
     SIZE_T shared_system_memory;
 };
 
+struct wined3d_video_memory_info
+{
+    UINT64 budget;
+    UINT64 current_usage;
+    UINT64 current_reservation;
+    UINT64 available_reservation;
+};
+
 struct wined3d_swapchain_desc
 {
     struct wined3d_output *output;
@@ -2323,7 +2337,7 @@ HRESULT __cdecl wined3d_check_device_format_conversion(const struct wined3d_outp
         enum wined3d_format_id target_format_id);
 HRESULT __cdecl wined3d_check_device_multisample_type(const struct wined3d_adapter *adapter,
         enum wined3d_device_type device_type, enum wined3d_format_id surface_format_id, BOOL windowed,
-        enum wined3d_multisample_type multisample_type, DWORD *quality_levels);
+        enum wined3d_multisample_type multisample_type, unsigned int *quality_levels);
 HRESULT __cdecl wined3d_check_device_type(const struct wined3d *wined3d,
         const struct wined3d_output *output, enum wined3d_device_type device_type,
         enum wined3d_format_id display_format_id, enum wined3d_format_id backbuffer_format_id,
@@ -2347,6 +2361,12 @@ HRESULT __cdecl wined3d_adapter_get_identifier(const struct wined3d_adapter *ada
 struct wined3d_output * __cdecl wined3d_adapter_get_output(const struct wined3d_adapter *adapter,
         unsigned int idx);
 unsigned int __cdecl wined3d_adapter_get_output_count(const struct wined3d_adapter *adapter);
+HRESULT __cdecl wined3d_adapter_get_video_memory_info(const struct wined3d_adapter *adapter,
+        unsigned int node_idx, enum wined3d_memory_segment_group group,
+        struct wined3d_video_memory_info *info);
+HRESULT __cdecl wined3d_adapter_register_budget_change_notification(const struct wined3d_adapter *adapter,
+        HANDLE event, DWORD *cookie);
+HRESULT __cdecl wined3d_adapter_unregister_budget_change_notification(DWORD cookie);
 
 HRESULT __cdecl wined3d_buffer_create(struct wined3d_device *device, const struct wined3d_buffer_desc *desc,
         const struct wined3d_sub_resource_data *data, void *parent, const struct wined3d_parent_ops *parent_ops,

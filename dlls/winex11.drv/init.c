@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <stdarg.h>
@@ -37,17 +41,29 @@ static int palette_size;
 
 static Pixmap stock_bitmap_pixmap;  /* phys bitmap for the default stock bitmap */
 
-static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
+static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 
 static const struct user_driver_funcs x11drv_funcs;
 static const struct gdi_dc_funcs *xrender_funcs;
+
+
+void init_recursive_mutex( pthread_mutex_t *mutex )
+{
+    pthread_mutexattr_t attr;
+
+    pthread_mutexattr_init( &attr );
+    pthread_mutexattr_settype( &attr, PTHREAD_MUTEX_RECURSIVE );
+    pthread_mutex_init( mutex, &attr );
+    pthread_mutexattr_destroy( &attr );
+}
+
 
 /**********************************************************************
  *	     device_init
  *
  * Perform initializations needed upon creation of the first device.
  */
-static BOOL WINAPI device_init( INIT_ONCE *once, void *param, void **context )
+static void device_init(void)
 {
     /* Initialize XRender */
     xrender_funcs = X11DRV_XRender_Init();
@@ -58,8 +74,6 @@ static BOOL WINAPI device_init( INIT_ONCE *once, void *param, void **context )
     palette_size = X11DRV_PALETTE_Init();
 
     stock_bitmap_pixmap = XCreatePixmap( gdi_display, root_window, 1, 1, 1 );
-
-    return TRUE;
 }
 
 
@@ -67,9 +81,9 @@ static X11DRV_PDEVICE *create_x11_physdev( Drawable drawable )
 {
     X11DRV_PDEVICE *physDev;
 
-    InitOnceExecuteOnce( &init_once, device_init, NULL, NULL );
+    pthread_once( &init_once, device_init );
 
-    if (!(physDev = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*physDev) ))) return NULL;
+    if (!(physDev = calloc( 1, sizeof(*physDev) ))) return NULL;
 
     physDev->drawable = drawable;
     physDev->gc = XCreateGC( gdi_display, drawable, 0, NULL );
@@ -125,7 +139,7 @@ static BOOL CDECL X11DRV_DeleteDC( PHYSDEV dev )
     X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
 
     XFreeGC( gdi_display, physDev->gc );
-    HeapFree( GetProcessHeap(), 0, physDev );
+    free( physDev );
     return TRUE;
 }
 
@@ -137,7 +151,7 @@ void add_device_bounds( X11DRV_PDEVICE *dev, const RECT *rect )
     if (!dev->bounds) return;
     if (dev->region && NtGdiGetRgnBox( dev->region, &rc ))
     {
-        if (IntersectRect( &rc, &rc, rect )) add_bounds_rect( dev->bounds, &rc );
+        if (intersect_rect( &rc, &rc, rect )) add_bounds_rect( dev->bounds, &rc );
     }
     else add_bounds_rect( dev->bounds, rect );
 }
@@ -372,6 +386,9 @@ static const struct user_driver_funcs x11drv_funcs =
     .dc_funcs.pStrokePath = X11DRV_StrokePath,
     .dc_funcs.pUnrealizePalette = X11DRV_UnrealizePalette,
     .dc_funcs.pD3DKMTCheckVidPnExclusiveOwnership = X11DRV_D3DKMTCheckVidPnExclusiveOwnership,
+    .dc_funcs.pD3DKMTCloseAdapter = X11DRV_D3DKMTCloseAdapter,
+    .dc_funcs.pD3DKMTOpenAdapterFromLuid = X11DRV_D3DKMTOpenAdapterFromLuid,
+    .dc_funcs.pD3DKMTQueryVideoMemoryInfo = X11DRV_D3DKMTQueryVideoMemoryInfo,
     .dc_funcs.pD3DKMTSetVidPnSourceOwner = X11DRV_D3DKMTSetVidPnSourceOwner,
     .dc_funcs.priority = GDI_PRIORITY_GRAPHICS_DRV,
 
@@ -391,6 +408,7 @@ static const struct user_driver_funcs x11drv_funcs =
     .pUpdateDisplayDevices = X11DRV_UpdateDisplayDevices,
     .pCreateDesktopWindow = X11DRV_CreateDesktopWindow,
     .pCreateWindow = X11DRV_CreateWindow,
+    .pDesktopWindowProc = X11DRV_DesktopWindowProc,
     .pDestroyWindow = X11DRV_DestroyWindow,
     .pFlashWindowEx = X11DRV_FlashWindowEx,
     .pGetDC = X11DRV_GetDC,

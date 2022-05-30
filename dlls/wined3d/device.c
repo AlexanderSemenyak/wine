@@ -1201,9 +1201,12 @@ void wined3d_device_gl_delete_opengl_contexts_cs(void *object)
     device->shader_backend->shader_free_private(device, context);
     wined3d_device_gl_destroy_dummy_textures(device_gl, context_gl);
 
-    wined3d_context_gl_submit_command_fence(context_gl);
-    wined3d_context_gl_wait_command_fence(context_gl,
-            wined3d_device_gl(context_gl->c.device)->current_fence_id - 1);
+    if (context_gl->c.d3d_info->fences)
+    {
+        wined3d_context_gl_submit_command_fence(context_gl);
+        wined3d_context_gl_wait_command_fence(context_gl,
+                wined3d_device_gl(context_gl->c.device)->current_fence_id - 1);
+    }
     wined3d_allocator_cleanup(&device_gl->allocator);
 
     context_release(context);
@@ -3686,7 +3689,7 @@ static HRESULT process_vertices_strided(const struct wined3d_device *device, DWO
                 diffuse_colour = material_diffuse;
             }
             wined3d_color_clamp(&diffuse_colour, &diffuse_colour, 0.0f, 1.0f);
-            *((DWORD *)dest_ptr) = wined3d_format_convert_from_float(output_colour_format, &diffuse_colour);
+            wined3d_format_convert_from_float(output_colour_format, &diffuse_colour, dest_ptr);
             dest_ptr += sizeof(DWORD);
         }
 
@@ -3710,7 +3713,7 @@ static HRESULT process_vertices_strided(const struct wined3d_device *device, DWO
             }
             update_fog_factor(&specular_colour.a, &ls);
             wined3d_color_clamp(&specular_colour, &specular_colour, 0.0f, 1.0f);
-            *((DWORD *)dest_ptr) = wined3d_format_convert_from_float(output_colour_format, &specular_colour);
+            wined3d_format_convert_from_float(output_colour_format, &specular_colour, dest_ptr);
             dest_ptr += sizeof(DWORD);
         }
 
@@ -4582,7 +4585,8 @@ HRESULT CDECL wined3d_device_validate_device(const struct wined3d_device *device
         }
 
         texture = state->textures[i];
-        if (!texture || texture->resource.format_flags & WINED3DFMT_FLAG_FILTERING) continue;
+        if (!texture || texture->resource.format_caps & WINED3D_FORMAT_CAP_FILTERING)
+            continue;
 
         if (state->sampler_states[i][WINED3D_SAMP_MAG_FILTER] != WINED3D_TEXF_POINT)
         {
@@ -4719,11 +4723,11 @@ static bool resources_format_compatible(const struct wined3d_resource *src_resou
         return true;
     if (src_resource->device->cs->c.state->feature_level < WINED3D_FEATURE_LEVEL_10_1)
         return false;
-    if ((src_resource->format_flags & WINED3DFMT_FLAG_BLOCKS)
-            && (dst_resource->format_flags & WINED3DFMT_FLAG_CAST_TO_BLOCK))
+    if ((src_resource->format_attrs & WINED3D_FORMAT_ATTR_BLOCKS)
+            && (dst_resource->format_attrs & WINED3D_FORMAT_ATTR_CAST_TO_BLOCK))
         return src_resource->format->block_byte_count == dst_resource->format->byte_count;
-    if ((src_resource->format_flags & WINED3DFMT_FLAG_CAST_TO_BLOCK)
-            && (dst_resource->format_flags & WINED3DFMT_FLAG_BLOCKS))
+    if ((src_resource->format_attrs & WINED3D_FORMAT_ATTR_CAST_TO_BLOCK)
+            && (dst_resource->format_attrs & WINED3D_FORMAT_ATTR_BLOCKS))
         return src_resource->format->byte_count == dst_resource->format->block_byte_count;
     return false;
 }
@@ -5117,7 +5121,7 @@ void CDECL wined3d_device_context_clear_uav_float(struct wined3d_device_context 
 {
     TRACE("context %p, view %p, clear_value %s.\n", context, view, debug_vec4(clear_value));
 
-    if (!(view->format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & (WINED3DFMT_FLAG_FLOAT | WINED3DFMT_FLAG_NORMALISED)))
+    if (!(view->format->attrs & (WINED3D_FORMAT_ATTR_FLOAT | WINED3D_FORMAT_ATTR_NORMALISED)))
     {
         WARN("Not supported for view format %s.\n", debug_d3dformat(view->format->id));
         return;
@@ -5219,7 +5223,8 @@ HRESULT CDECL wined3d_device_context_map(struct wined3d_device_context *context,
         if (resource->type != WINED3D_RTYPE_BUFFER && resource->type != WINED3D_RTYPE_TEXTURE_2D)
             return WINED3DERR_INVALIDCALL;
 
-        if ((resource->format_flags & WINED3DFMT_FLAG_BLOCKS) && !(resource->access & WINED3D_RESOURCE_ACCESS_CPU))
+        if ((resource->format_attrs & WINED3D_FORMAT_ATTR_BLOCKS) &&
+                !(resource->access & WINED3D_RESOURCE_ACCESS_CPU))
             return WINED3DERR_INVALIDCALL;
     }
 

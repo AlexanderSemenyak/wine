@@ -29,6 +29,7 @@
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmadec);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 static const GUID *const wma_decoder_input_types[] =
 {
@@ -538,10 +539,12 @@ static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFS
 
     /* WMA transform uses fixed size input samples and ignores samples with invalid sizes */
     if (wg_sample->size % info.cbSize)
-        hr = S_OK;
-    else
-        hr = wg_transform_push_data(decoder->wg_transform, wg_sample);
+    {
+        mf_destroy_wg_sample(wg_sample);
+        return S_OK;
+    }
 
+    hr = wg_transform_push_data(decoder->wg_transform, wg_sample);
     mf_destroy_wg_sample(wg_sample);
     return hr;
 }
@@ -578,14 +581,26 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
 
     wg_sample->size = 0;
     if (wg_sample->max_size < info.cbSize)
-        hr = MF_E_BUFFERTOOSMALL;
-    else if (SUCCEEDED(hr = wg_transform_read_data(decoder->wg_transform, wg_sample)))
+    {
+        mf_destroy_wg_sample(wg_sample);
+        return MF_E_BUFFERTOOSMALL;
+    }
+
+    if (SUCCEEDED(hr = wg_transform_read_data(decoder->wg_transform, wg_sample, NULL)))
     {
         if (wg_sample->flags & WG_SAMPLE_FLAG_INCOMPLETE)
             samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_INCOMPLETE;
     }
 
     mf_destroy_wg_sample(wg_sample);
+
+    if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
+    {
+        FIXME("Unexpected stream format change!\n");
+        samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE;
+        *status |= MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE;
+    }
+
     return hr;
 }
 
@@ -853,9 +868,29 @@ static const IPropertyBagVtbl property_bag_vtbl =
 
 HRESULT wma_decoder_create(IUnknown *outer, IUnknown **out)
 {
+    static const struct wg_format output_format =
+    {
+        .major_type = WG_MAJOR_TYPE_AUDIO,
+        .u.audio =
+        {
+            .format = WG_AUDIO_FORMAT_F32LE,
+            .channel_mask = 1,
+            .channels = 1,
+            .rate = 44100,
+        },
+    };
+    static const struct wg_format input_format = {.major_type = WG_MAJOR_TYPE_WMA};
+    struct wg_transform *transform;
     struct wma_decoder *decoder;
 
     TRACE("outer %p, out %p.\n", outer, out);
+
+    if (!(transform = wg_transform_create(&input_format, &output_format)))
+    {
+        ERR_(winediag)("GStreamer doesn't support WMA decoding, please install appropriate plugins\n");
+        return E_FAIL;
+    }
+    wg_transform_destroy(transform);
 
     if (!(decoder = calloc(1, sizeof(*decoder))))
         return E_OUTOFMEMORY;

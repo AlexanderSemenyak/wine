@@ -28,6 +28,8 @@
 
 #include <limits.h>
 #include <stdarg.h>
+#include <stdlib.h>
+#include <pthread.h>
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
@@ -55,10 +57,14 @@
 #undef Status  /* avoid conflict with wintrnl.h */
 typedef int Status;
 
+/* avoid conflict with processthreadsapi.h */
+#undef ControlMask
+
 #include "windef.h"
 #include "winbase.h"
 #include "ntgdi.h"
 #include "wine/gdi_driver.h"
+#include "unixlib.h"
 #include "wine/list.h"
 
 #define MAX_DASHLEN 16
@@ -152,6 +158,9 @@ extern BOOL CDECL X11DRV_Arc( PHYSDEV dev, INT left, INT top, INT right,
 extern BOOL CDECL X11DRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                                 INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
 extern NTSTATUS CDECL X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL X11DRV_D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL X11DRV_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL X11DRV_D3DKMTQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc ) DECLSPEC_HIDDEN;
 extern NTSTATUS CDECL X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc ) DECLSPEC_HIDDEN;
 extern BOOL CDECL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
 extern BOOL CDECL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType ) DECLSPEC_HIDDEN;
@@ -212,6 +221,7 @@ extern void X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device
                                          BOOL force, void *param ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_CreateDesktopWindow( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_CreateWindow( HWND hwnd ) DECLSPEC_HIDDEN;
+extern LRESULT X11DRV_DesktopWindowProc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp ) DECLSPEC_HIDDEN;
 extern void X11DRV_DestroyWindow( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void X11DRV_FlashWindowEx( PFLASHWINFO pfinfo ) DECLSPEC_HIDDEN;
 extern void X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
@@ -280,24 +290,9 @@ extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void) DECLSPEC_HIDDEN;
 extern struct opengl_funcs *get_glx_driver(UINT) DECLSPEC_HIDDEN;
 extern const struct vulkan_funcs *get_vulkan_driver(UINT) DECLSPEC_HIDDEN;
 
-/* IME support */
-extern void IME_SetOpenStatus(BOOL fOpen) DECLSPEC_HIDDEN;
-extern void IME_SetCompositionStatus(BOOL fOpen) DECLSPEC_HIDDEN;
-extern INT IME_GetCursorPos(void) DECLSPEC_HIDDEN;
-extern void IME_SetCursorPos(DWORD pos) DECLSPEC_HIDDEN;
-extern void IME_UpdateAssociation(HWND focus) DECLSPEC_HIDDEN;
-extern BOOL IME_SetCompositionString(DWORD dwIndex, LPCVOID lpComp,
-                                     DWORD dwCompLen, LPCVOID lpRead,
-                                     DWORD dwReadLen) DECLSPEC_HIDDEN;
-extern void IME_SetResultString(LPWSTR lpResult, DWORD dwResultlen) DECLSPEC_HIDDEN;
-
-extern void X11DRV_XDND_EnterEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
-extern void X11DRV_XDND_PositionEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
-extern void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
-extern void X11DRV_XDND_LeaveEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
-extern void X11DRV_CLIPBOARD_ImportSelection( Display *display, Window win, Atom selection,
-                                              Atom *targets, UINT count,
-                                              void (*callback)( Atom, UINT, HANDLE )) DECLSPEC_HIDDEN;
+extern struct format_entry *import_xdnd_selection( Display *display, Window win, Atom selection,
+                                                   Atom *targets, UINT count,
+                                                   size_t *size ) DECLSPEC_HIDDEN;
 
 /**************************************************************************
  * X11 GDI driver
@@ -393,14 +388,10 @@ struct x11drv_thread_data
 };
 
 extern struct x11drv_thread_data *x11drv_init_thread_data(void) DECLSPEC_HIDDEN;
-extern DWORD thread_data_tls_index DECLSPEC_HIDDEN;
 
 static inline struct x11drv_thread_data *x11drv_thread_data(void)
 {
-    DWORD err = GetLastError();  /* TlsGetValue always resets last error */
-    struct x11drv_thread_data *data = TlsGetValue( thread_data_tls_index );
-    SetLastError( err );
-    return data;
+    return NtUserGetThreadInfo()->driver_data;
 }
 
 /* retrieve the thread display, or NULL if not created yet */
@@ -450,9 +441,12 @@ extern int primary_monitor DECLSPEC_HIDDEN;
 extern int copy_default_colors DECLSPEC_HIDDEN;
 extern int alloc_system_colors DECLSPEC_HIDDEN;
 extern int xrender_error_base DECLSPEC_HIDDEN;
-extern HMODULE x11drv_module DECLSPEC_HIDDEN;
 extern char *process_name DECLSPEC_HIDDEN;
 extern Display *clipboard_display DECLSPEC_HIDDEN;
+extern WNDPROC client_foreign_window_proc;
+
+extern NTSTATUS (WINAPI *pNtWaitForMultipleObjects)(ULONG,const HANDLE*,BOOLEAN,
+                                                    BOOLEAN,const LARGE_INTEGER*) DECLSPEC_HIDDEN;
 
 /* atoms */
 
@@ -657,9 +651,11 @@ extern Window create_dummy_client_window(void) DECLSPEC_HIDDEN;
 extern Window create_client_window( HWND hwnd, const XVisualInfo *visual ) DECLSPEC_HIDDEN;
 extern void set_window_visual( struct x11drv_win_data *data, const XVisualInfo *vis, BOOL use_alpha ) DECLSPEC_HIDDEN;
 extern void change_systray_owner( Display *display, Window systray_window ) DECLSPEC_HIDDEN;
-extern void update_systray_balloon_position(void) DECLSPEC_HIDDEN;
 extern HWND create_foreign_window( Display *display, Window window ) DECLSPEC_HIDDEN;
 extern BOOL update_clipboard( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void init_win_context(void) DECLSPEC_HIDDEN;
+extern void *file_list_to_drop_files( const void *data, size_t size, size_t *ret_size ) DECLSPEC_HIDDEN;
+extern void *uri_list_to_drop_files( const void *data, size_t size, size_t *ret_size ) DECLSPEC_HIDDEN;
 
 static inline void mirror_rect( const RECT *window_rect, RECT *rect )
 {
@@ -671,12 +667,9 @@ static inline void mirror_rect( const RECT *window_rect, RECT *rect )
 
 /* X context to associate a hwnd to an X window */
 extern XContext winContext DECLSPEC_HIDDEN;
-/* X context to associate a struct x11drv_win_data to an hwnd */
-extern XContext win_data_context DECLSPEC_HIDDEN;
 /* X context to associate an X cursor to a Win32 cursor handle */
 extern XContext cursor_context DECLSPEC_HIDDEN;
 
-extern void X11DRV_InitClipboard(void) DECLSPEC_HIDDEN;
 extern void X11DRV_SetFocus( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void set_window_cursor( Window window, HCURSOR handle ) DECLSPEC_HIDDEN;
 extern void sync_window_cursor( Window window ) DECLSPEC_HIDDEN;
@@ -688,20 +681,22 @@ extern void retry_grab_clipping_window(void) DECLSPEC_HIDDEN;
 extern BOOL clip_fullscreen_window( HWND hwnd, BOOL reset ) DECLSPEC_HIDDEN;
 extern void move_resize_window( HWND hwnd, int dir ) DECLSPEC_HIDDEN;
 extern void X11DRV_InitKeyboard( Display *display ) DECLSPEC_HIDDEN;
-extern DWORD X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
-                                                 DWORD mask, DWORD flags ) DECLSPEC_HIDDEN;
+extern NTSTATUS X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
+                                                    const LARGE_INTEGER *timeout,
+                                                    DWORD mask, DWORD flags ) DECLSPEC_HIDDEN;
+extern HWND *build_hwnd_list(void) DECLSPEC_HIDDEN;
 
 typedef int (*x11drv_error_callback)( Display *display, XErrorEvent *event, void *arg );
 
 extern void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg ) DECLSPEC_HIDDEN;
 extern int X11DRV_check_error(void) DECLSPEC_HIDDEN;
 extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect, int x, int y, int cx, int cy ) DECLSPEC_HIDDEN;
-extern BOOL is_window_rect_full_screen( const RECT *rect ) DECLSPEC_HIDDEN;
 extern POINT virtual_screen_to_root( INT x, INT y ) DECLSPEC_HIDDEN;
 extern POINT root_to_virtual_screen( INT x, INT y ) DECLSPEC_HIDDEN;
 extern RECT get_host_primary_monitor_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_work_area( const RECT *monitor_rect ) DECLSPEC_HIDDEN;
 extern void xinerama_init( unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
+extern void init_recursive_mutex( pthread_mutex_t *mutex ) DECLSPEC_HIDDEN;
 
 #define DEPTH_COUNT 3
 extern const unsigned int *depths DECLSPEC_HIDDEN;
@@ -824,8 +819,6 @@ extern BOOL X11DRV_InitXIM( const WCHAR *input_style ) DECLSPEC_HIDDEN;
 extern XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data) DECLSPEC_HIDDEN;
 extern void X11DRV_SetupXIM(void) DECLSPEC_HIDDEN;
 extern void X11DRV_XIMLookupChars( const char *str, DWORD count ) DECLSPEC_HIDDEN;
-extern void X11DRV_ForceXIMReset(HWND hwnd) DECLSPEC_HIDDEN;
-extern void X11DRV_SetPreeditState(HWND hwnd, BOOL fOpen) DECLSPEC_HIDDEN;
 
 #define XEMBED_MAPPED  (1 << 0)
 
@@ -837,6 +830,25 @@ static inline BOOL is_window_rect_mapped( const RECT *rect )
             max( rect->right, rect->left + 1 ) > virtual_rect.left &&
             max( rect->bottom, rect->top + 1 ) > virtual_rect.top);
 }
+
+/* unixlib interface */
+
+extern NTSTATUS x11drv_clipboard_message( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_create_desktop( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_systray_clear( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_systray_dock( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_systray_hide( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_systray_init( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_tablet_attach_queue( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_tablet_get_packet( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_tablet_load_info( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_tablet_info( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_xim_preedit_state( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_xim_reset( void *arg ) DECLSPEC_HIDDEN;
+
+extern NTSTATUS x11drv_client_func( enum x11drv_client_funcs func, const void *params,
+                                    ULONG size ) DECLSPEC_HIDDEN;
+extern NTSTATUS x11drv_client_call( enum client_callback func, UINT arg ) DECLSPEC_HIDDEN;
 
 /* GDI helpers */
 
@@ -886,6 +898,15 @@ static inline HWND get_active_window(void)
     return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
 }
 
+static inline BOOL intersect_rect( RECT *dst, const RECT *src1, const RECT *src2 )
+{
+    dst->left   = max( src1->left, src2->left );
+    dst->top    = max( src1->top, src2->top );
+    dst->right  = min( src1->right, src2->right );
+    dst->bottom = min( src1->bottom, src2->bottom );
+    return !IsRectEmpty( dst );
+}
+
 /* registry helpers */
 
 extern HKEY open_hkcu_key( const char *name ) DECLSPEC_HIDDEN;
@@ -906,5 +927,55 @@ static inline UINT asciiz_to_unicode( WCHAR *dst, const char *src )
     while ((*p++ = *src++));
     return (p - dst) * sizeof(WCHAR);
 }
+
+static inline LONG x11drv_wcstol( LPCWSTR s, LPWSTR *end, INT base )
+{
+    BOOL negative = FALSE, empty = TRUE;
+    LONG ret = 0;
+
+    if (base < 0 || base == 1 || base > 36) return 0;
+    if (end) *end = (WCHAR *)s;
+    while (*s == ' ' || *s == '\t') s++;
+
+    if (*s == '-')
+    {
+        negative = TRUE;
+        s++;
+    }
+    else if (*s == '+') s++;
+
+    if ((base == 0 || base == 16) && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+    {
+        base = 16;
+        s += 2;
+    }
+    if (base == 0) base = s[0] != '0' ? 10 : 8;
+
+    while (*s)
+    {
+        int v;
+
+        if ('0' <= *s && *s <= '9') v = *s - '0';
+        else if ('A' <= *s && *s <= 'Z') v = *s - 'A' + 10;
+        else if ('a' <= *s && *s <= 'z') v = *s - 'a' + 10;
+        else break;
+        if (v >= base) break;
+        if (negative) v = -v;
+        s++;
+        empty = FALSE;
+
+        if (!negative && (ret > MAXLONG / base || ret * base > MAXLONG - v))
+            ret = MAXLONG;
+        else if (negative && (ret < (LONG)MINLONG / base || ret * base < (LONG)(MINLONG - v)))
+            ret = MINLONG;
+        else
+            ret = ret * base + v;
+    }
+
+    if (end && !empty) *end = (WCHAR *)s;
+    return ret;
+}
+
+#define wcstol x11drv_wcstol
 
 #endif  /* __WINE_X11DRV_H */

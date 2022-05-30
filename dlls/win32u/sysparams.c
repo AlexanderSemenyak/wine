@@ -702,7 +702,6 @@ static void cleanup_devices(void)
 
     hkey = reg_open_key( enum_key, pciW, sizeof(pciW) );
 
-restart:
     while (!NtEnumerateKey( hkey, i++, KeyNodeInformation, key, sizeof(buffer), &size ))
     {
         unsigned int j = 0;
@@ -735,7 +734,7 @@ restart:
             NtClose( device_key );
 
             if (!present && reg_delete_tree( subkey, bufferW, lstrlenW( bufferW ) * sizeof(WCHAR) ))
-                goto restart;
+                j = 0;
         }
 
         NtClose( subkey );
@@ -1247,7 +1246,7 @@ static void clear_display_devices(void)
 static BOOL update_display_cache_from_registry(void)
 {
     DWORD adapter_id, monitor_id, monitor_count = 0, size;
-    KEY_FULL_INFORMATION key;
+    KEY_BASIC_INFORMATION key;
     struct adapter *adapter;
     struct monitor *monitor;
     HANDLE mutex = NULL;
@@ -1259,7 +1258,8 @@ static BOOL update_display_cache_from_registry(void)
                                                   sizeof(devicemap_video_keyW) )))
         return FALSE;
 
-    status = NtQueryKey( video_key, KeyFullInformation, &key, sizeof(key), &size );
+    status = NtQueryKey( video_key, KeyBasicInformation, &key,
+                         offsetof(KEY_BASIC_INFORMATION, Name), &size );
     if (status && status != STATUS_BUFFER_OVERFLOW)
         return FALSE;
 
@@ -1516,6 +1516,26 @@ POINT point_phys_to_win_dpi( HWND hwnd, POINT pt )
     return map_dpi_point( pt, get_win_monitor_dpi( hwnd ), get_dpi_for_window( hwnd ));
 }
 
+/**********************************************************************
+ *              point_thread_to_win_dpi
+ */
+POINT point_thread_to_win_dpi( HWND hwnd, POINT pt )
+{
+    UINT dpi = get_thread_dpi();
+    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
+    return map_dpi_point( pt, dpi, get_dpi_for_window( hwnd ));
+}
+
+/**********************************************************************
+ *              rect_thread_to_win_dpi
+ */
+RECT rect_thread_to_win_dpi( HWND hwnd, RECT rect )
+{
+    UINT dpi = get_thread_dpi();
+    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
+    return map_dpi_rect( rect, dpi, get_dpi_for_window( hwnd ) );
+}
+
 /* map value from system dpi to standard 96 dpi for storing in the registry */
 static int map_from_system_dpi( int val )
 {
@@ -1545,6 +1565,27 @@ RECT get_virtual_screen_rect( UINT dpi )
 
     if (dpi) rect = map_dpi_rect( rect, system_dpi, dpi );
     return rect;
+}
+
+static BOOL is_window_rect_full_screen( const RECT *rect )
+{
+    struct monitor *monitor;
+    BOOL ret = FALSE;
+
+    if (!lock_display_devices()) return FALSE;
+
+    LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
+    {
+        if (rect->left <= monitor->rc_monitor.left && rect->right >= monitor->rc_monitor.right &&
+            rect->top <= monitor->rc_monitor.top && rect->bottom >= monitor->rc_monitor.bottom)
+        {
+            ret = TRUE;
+            break;
+        }
+    }
+
+    unlock_display_devices();
+    return ret;
 }
 
 RECT get_display_rect( const WCHAR *display )
@@ -1970,7 +2011,7 @@ BOOL WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc
 
         monrect = map_dpi_rect( monitor->rc_monitor, get_monitor_dpi( monitor->handle ),
                                 get_thread_dpi() );
-        offset_rect( &monrect, -origin.x, -origin.y );
+        OffsetRect( &monrect, -origin.x, -origin.y );
         if (!intersect_rect( &monrect, &monrect, &limit )) continue;
 
         enum_info[count].handle = monitor->handle;
@@ -2049,7 +2090,7 @@ HMONITOR monitor_from_rect( const RECT *rect, DWORD flags, UINT dpi )
     RECT r;
 
     r = map_dpi_rect( *rect, dpi, system_dpi );
-    if (is_rect_empty( &r ))
+    if (IsRectEmpty( &r ))
     {
         r.right = r.left + 1;
         r.bottom = r.top + 1;
@@ -2123,7 +2164,7 @@ HMONITOR monitor_from_window( HWND hwnd, DWORD flags, UINT dpi )
     TRACE( "(%p, 0x%08x)\n", hwnd, flags );
 
     wp.length = sizeof(wp);
-    if (is_iconic( hwnd ) && get_window_placement( hwnd, &wp ))
+    if (is_iconic( hwnd ) && NtUserGetWindowPlacement( hwnd, &wp ))
         return monitor_from_rect( &wp.rcNormalPosition, flags, dpi );
 
     if (get_window_rect( hwnd, &rect, dpi ))
@@ -2761,7 +2802,7 @@ static BOOL get_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
                   debugstr_a( entry->hdr.regval ));
             /* fall through */
         case 0: /* use the default GUI font */
-            NtGdiExtGetObjectW( get_stock_object( DEFAULT_GUI_FONT ), sizeof(font), &font );
+            NtGdiExtGetObjectW( GetStockObject( DEFAULT_GUI_FONT ), sizeof(font), &font );
             font.lfHeight = map_from_system_dpi( font.lfHeight );
             font.lfWeight = entry->font.weight;
             entry->font.val = font;
@@ -2800,7 +2841,7 @@ static BOOL set_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
 /* initialize a font (binary) parameter */
 static BOOL init_font_entry( union sysparam_all_entry *entry )
 {
-    NtGdiExtGetObjectW( get_stock_object( DEFAULT_GUI_FONT ), sizeof(entry->font.val), &entry->font.val );
+    NtGdiExtGetObjectW( GetStockObject( DEFAULT_GUI_FONT ), sizeof(entry->font.val), &entry->font.val );
     entry->font.val.lfHeight = map_from_system_dpi( entry->font.val.lfHeight );
     entry->font.val.lfWeight = entry->font.weight;
     get_real_fontname( &entry->font.val, entry->font.fullname );
@@ -3170,7 +3211,7 @@ void sysparams_init(void)
 
         if ((hkey = reg_open_key( config_key, software_fontsW, sizeof(software_fontsW) )))
         {
-            char buffer[sizeof(KEY_VALUE_PARTIAL_INFORMATION) + sizeof(DWORD)];
+            char buffer[offsetof(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(DWORD)])];
             KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
 
             if (query_reg_value( hkey, log_pixelsW, value, sizeof(buffer) ) && value->Type == REG_DWORD)
@@ -4485,7 +4526,7 @@ static HBRUSH get_55aa_brush(void)
     return brush_55aa;
 }
 
-static HBRUSH get_sys_color_brush( unsigned int index )
+HBRUSH get_sys_color_brush( unsigned int index )
 {
     if (index == COLOR_55AA_BRUSH) return get_55aa_brush();
     if (index >= ARRAY_SIZE( system_colors )) return 0;
@@ -4632,14 +4673,14 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 {
     switch(code)
     {
+    case NtUserCallNoParam_DestroyCaret:
+        return destroy_caret();
+
     case NtUserCallNoParam_GetDesktopWindow:
         return HandleToUlong( get_desktop_window() );
 
     case NtUserCallNoParam_GetInputState:
         return get_input_state();
-
-    case NtUserCallNoParam_GetMessagePos:
-        return get_user_thread_info()->GetMessagePosVal;
 
     case NtUserCallNoParam_ReleaseCapture:
         return release_capture();
@@ -4651,10 +4692,6 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 
     case NtUserThreadDetach:
         thread_detach();
-        return 0;
-
-    case NtUserUpdateClipboard:
-        user_driver->pUpdateClipboard();
         return 0;
 
     default:
@@ -4689,6 +4726,9 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
         enable_thunk_lock = arg;
         return 0;
 
+    case NtUserCallOneParam_EnumClipboardFormats:
+        return enum_clipboard_formats( arg );
+
     case NtUserCallOneParam_GetClipCursor:
         return get_clip_cursor( (RECT *)arg );
 
@@ -4698,8 +4738,14 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
     case NtUserCallOneParam_GetIconParam:
         return get_icon_param( UlongToHandle(arg) );
 
+    case NtUserCallOneParam_GetMenuItemCount:
+        return get_menu_item_count( UlongToHandle(arg) );
+
     case NtUserCallOneParam_GetSysColor:
         return get_sys_color( arg );
+
+    case NtUserCallOneParam_IsWindowRectFullScreen:
+        return is_window_rect_full_screen( (const RECT *)arg );
 
     case NtUserCallOneParam_RealizePalette:
         return realize_palette( UlongToHandle(arg) );
@@ -4723,6 +4769,9 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
 
     case NtUserCallOneParam_MessageBeep:
         return message_beep( arg );
+
+    case NtUserCallOneParam_SetCaretBlinkTime:
+        return set_caret_blink_time( arg );
 
     /* temporary exports */
     case NtUserCallHooks:
@@ -4765,6 +4814,9 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
 {
     switch(code)
     {
+    case NtUserCallTwoParam_GetMenuInfo:
+        return get_menu_info( UlongToHandle(arg1), (MENUINFO *)arg2 );
+
     case NtUserCallTwoParam_GetMonitorInfo:
         return get_monitor_info( UlongToHandle(arg1), (MONITORINFO *)arg2 );
 
@@ -4776,6 +4828,9 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
 
     case NtUserCallTwoParam_ReplyMessage:
         return reply_message_result( arg1, (MSG *)arg2 );
+
+    case NtUserCallTwoParam_SetCaretPos:
+        return set_caret_pos( arg1, arg2 );
 
     case NtUserCallTwoParam_SetIconParam:
         return set_icon_param( UlongToHandle(arg1), arg2 );

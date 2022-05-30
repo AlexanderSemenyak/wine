@@ -202,7 +202,7 @@ void create_offscreen_window_surface( const RECT *visible_rect, struct window_su
 
     TRACE( "visible_rect %s, surface %p.\n", wine_dbgstr_rect( visible_rect ), surface );
 
-    offset_rect( &surface_rect, -surface_rect.left, -surface_rect.top );
+    OffsetRect( &surface_rect, -surface_rect.left, -surface_rect.top );
     surface_rect.right  = (surface_rect.right + 0x1f) & ~0x1f;
     surface_rect.bottom = (surface_rect.bottom + 0x1f) & ~0x1f;
 
@@ -1319,9 +1319,9 @@ void move_window_bits_parent( HWND hwnd, HWND parent, const RECT *window_rect, c
 
     TRACE( "copying %s -> %s\n", wine_dbgstr_rect( &src ), wine_dbgstr_rect( &dst ));
     map_window_points( NtUserGetAncestor( hwnd, GA_PARENT ), parent, (POINT *)&src, 2, get_thread_dpi() );
-    offset_rect( &src, win->client_rect.left - win->visible_rect.left,
-                 win->client_rect.top - win->visible_rect.top );
-    offset_rect( &dst, -window_rect->left, -window_rect->top );
+    OffsetRect( &src, win->client_rect.left - win->visible_rect.left,
+                win->client_rect.top - win->visible_rect.top );
+    OffsetRect( &dst, -window_rect->left, -window_rect->top );
     window_surface_add_ref( surface );
     release_win_ptr( win );
 
@@ -1340,7 +1340,7 @@ HDC WINAPI NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps )
     RECT rect;
     UINT flags = UPDATE_NONCLIENT | UPDATE_ERASE | UPDATE_PAINT | UPDATE_INTERNALPAINT | UPDATE_NOCHILDREN;
 
-    if (user_callbacks) user_callbacks->pHideCaret( hwnd );
+    NtUserHideCaret( hwnd );
 
     if (!(hrgn = send_ncpaint( hwnd, NULL, &flags ))) return 0;
 
@@ -1364,7 +1364,7 @@ HDC WINAPI NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps )
  */
 BOOL WINAPI NtUserEndPaint( HWND hwnd, const PAINTSTRUCT *ps )
 {
-    if (user_callbacks) user_callbacks->pShowCaret( hwnd );
+    NtUserShowCaret( hwnd );
     flush_window_surfaces( FALSE );
     if (!ps) return FALSE;
     release_dc( hwnd, ps->hdc, TRUE );
@@ -1432,6 +1432,7 @@ static void update_now( HWND hwnd, UINT rdw_flags )
  */
 BOOL WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT flags )
 {
+    LARGE_INTEGER zero = { .QuadPart = 0 };
     static const RECT empty;
     BOOL ret;
 
@@ -1452,12 +1453,15 @@ BOOL WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT fla
     }
 
     /* process pending expose events before painting */
-    if (flags & RDW_UPDATENOW) user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_PAINT, 0 );
+    if (flags & RDW_UPDATENOW) user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, &zero, QS_PAINT, 0 );
 
     if (rect && !hrgn)
     {
-        if (IsRectEmpty( rect )) rect = &empty;
-        ret = redraw_window_rects( hwnd, flags, rect, 1 );
+        RECT ordered = *rect;
+
+        order_rect( &ordered );
+        if (IsRectEmpty( &ordered )) ordered = empty;
+        ret = redraw_window_rects( hwnd, flags, &ordered, 1 );
     }
     else if (!hrgn)
     {

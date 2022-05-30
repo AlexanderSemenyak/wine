@@ -112,7 +112,7 @@ BOOL CDECL nulldrv_InvertRgn( PHYSDEV dev, HRGN rgn )
     INT prev_rop = dc->attr->rop_mode;
     BOOL ret;
     dc->attr->rop_mode = R2_NOT;
-    ret = NtGdiFillRgn( dev->hdc, rgn, get_stock_object(BLACK_BRUSH) );
+    ret = NtGdiFillRgn( dev->hdc, rgn, GetStockObject(BLACK_BRUSH) );
     dc->attr->rop_mode = prev_rop;
     return ret;
 }
@@ -958,7 +958,7 @@ BOOL WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const R
     else
         NtGdiGetAppClipBox( hdc, &clip_rect );
     src_rect = clip_rect;
-    offset_rect( &clip_rect, -dx, -dy );
+    OffsetRect( &clip_rect, -dx, -dy );
     intersect_rect( &src_rect, &src_rect, &clip_rect );
 
     /* if an scroll rectangle is specified, only the pixels within that

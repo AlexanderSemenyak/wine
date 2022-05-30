@@ -861,22 +861,19 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageA( const MSG* msg )
     LRESULT retval;
 
       /* Process timer messages */
-    if ((msg->message == WM_TIMER) || (msg->message == WM_SYSTIMER))
+    if (msg->lParam && msg->message == WM_TIMER)
     {
-        if (msg->lParam)
+        __TRY
         {
-            __TRY
-            {
-                retval = CallWindowProcA( (WNDPROC)msg->lParam, msg->hwnd,
-                                          msg->message, msg->wParam, GetTickCount() );
-            }
-            __EXCEPT_ALL
-            {
-                retval = 0;
-            }
-            __ENDTRY
-            return retval;
+            retval = CallWindowProcA( (WNDPROC)msg->lParam, msg->hwnd,
+                                      msg->message, msg->wParam, GetTickCount() );
         }
+        __EXCEPT_ALL
+        {
+            retval = 0;
+        }
+        __ENDTRY
+        return retval;
     }
     return NtUserDispatchMessageA( msg );
 }
@@ -954,7 +951,7 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageW( const MSG* msg )
  */
 DWORD WINAPI GetMessagePos(void)
 {
-    return get_user_thread_info()->GetMessagePosVal;
+    return NtUserGetThreadInfo()->message_pos;
 }
 
 
@@ -975,7 +972,7 @@ DWORD WINAPI GetMessagePos(void)
  */
 LONG WINAPI GetMessageTime(void)
 {
-    return get_user_thread_info()->GetMessageTimeVal;
+    return NtUserGetThreadInfo()->message_time;
 }
 
 
@@ -985,7 +982,7 @@ LONG WINAPI GetMessageTime(void)
  */
 LPARAM WINAPI GetMessageExtraInfo(void)
 {
-    return get_user_thread_info()->GetMessageExtraInfoVal;
+    return NtUserGetThreadInfo()->message_extra;
 }
 
 
@@ -994,9 +991,9 @@ LPARAM WINAPI GetMessageExtraInfo(void)
  */
 LPARAM WINAPI SetMessageExtraInfo(LPARAM lParam)
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
-    LONG old_value = thread_info->GetMessageExtraInfoVal;
-    thread_info->GetMessageExtraInfoVal = lParam;
+    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
+    LONG old_value = thread_info->message_extra;
+    thread_info->message_extra = lParam;
     return old_value;
 }
 
@@ -1266,6 +1263,17 @@ BOOL WINAPI MessageBeep( UINT i )
 UINT_PTR WINAPI SetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc )
 {
     return NtUserSetTimer( hwnd, id, timeout, proc, TIMERV_DEFAULT_COALESCING );
+}
+
+
+/******************************************************************
+ *      SetSystemTimer (USER32.@)
+ */
+UINT_PTR WINAPI SetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, void *unknown )
+{
+    if (unknown) FIXME( "ignoring unknown parameter %p\n", unknown );
+
+    return NtUserSetSystemTimer( hwnd, id, timeout );
 }
 
 

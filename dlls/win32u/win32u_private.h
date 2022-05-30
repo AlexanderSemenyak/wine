@@ -58,10 +58,14 @@ struct unix_funcs
                                                      ULONG flags, HANDLE xform );
     HDC      (WINAPI *pNtGdiCreateMetafileDC)( HDC hdc );
     NTSTATUS (WINAPI *pNtGdiDdDDICheckVidPnExclusiveOwnership)( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc );
+    NTSTATUS (WINAPI *pNtGdiDdDDICloseAdapter)( const D3DKMT_CLOSEADAPTER *desc );
     NTSTATUS (WINAPI *pNtGdiDdDDICreateDCFromMemory)( D3DKMT_CREATEDCFROMMEMORY *desc );
     NTSTATUS (WINAPI *pNtGdiDdDDIDestroyDCFromMemory)( const D3DKMT_DESTROYDCFROMMEMORY *desc );
     NTSTATUS (WINAPI *pNtGdiDdDDIDestroyDevice)( const D3DKMT_DESTROYDEVICE *desc );
     NTSTATUS (WINAPI *pNtGdiDdDDIEscape)( const D3DKMT_ESCAPE *desc );
+    NTSTATUS (WINAPI *pNtGdiDdDDIOpenAdapterFromDeviceName)( D3DKMT_OPENADAPTERFROMDEVICENAME *desc );
+    NTSTATUS (WINAPI *pNtGdiDdDDIOpenAdapterFromLuid)( D3DKMT_OPENADAPTERFROMLUID *desc );
+    NTSTATUS (WINAPI *pNtGdiDdDDIQueryVideoMemoryInfo)( D3DKMT_QUERYVIDEOMEMORYINFO *desc );
     NTSTATUS (WINAPI *pNtGdiDdDDISetVidPnSourceOwner)( const D3DKMT_SETVIDPNSOURCEOWNER *desc );
     BOOL     (WINAPI *pNtGdiDeleteObjectApp)( HGDIOBJ obj );
     LONG     (WINAPI *pNtGdiDoPalette)( HGDIOBJ handle, WORD start, WORD count, void *entries,
@@ -191,11 +195,13 @@ struct unix_funcs
     ULONG_PTR (WINAPI *pNtUserCallNoParam)( ULONG code );
     ULONG_PTR (WINAPI *pNtUserCallOneParam)( ULONG_PTR arg, ULONG code );
     ULONG_PTR (WINAPI *pNtUserCallTwoParam)( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code );
+    BOOL     (WINAPI *pNtUserChangeClipboardChain)( HWND hwnd, HWND next );
     LONG     (WINAPI *pNtUserChangeDisplaySettings)( UNICODE_STRING *devname, DEVMODEW *devmode, HWND hwnd,
                                                      DWORD flags, void *lparam );
     BOOL     (WINAPI *pNtUserClipCursor)( const RECT *rect );
     BOOL     (WINAPI *pNtUserCloseClipboard)(void);
     INT      (WINAPI *pNtUserCountClipboardFormats)(void);
+    BOOL     (WINAPI *pNtUserCreateCaret)( HWND hwnd, HBITMAP bitmap, int width, int height );
     HWND     (WINAPI *pNtUserCreateWindowEx)( DWORD ex_style, UNICODE_STRING *class_name,
                                               UNICODE_STRING *version, UNICODE_STRING *window_name,
                                               DWORD style, INT x, INT y, INT width, INT height,
@@ -210,6 +216,7 @@ struct unix_funcs
     LRESULT  (WINAPI *pNtUserDispatchMessage)( const MSG *msg );
     BOOL     (WINAPI *pNtUserDrawIconEx)( HDC hdc, INT x0, INT y0, HICON icon, INT width,
                                           INT height, UINT istep, HBRUSH hbr, UINT flags );
+    BOOL     (WINAPI *pNtUserEmptyClipboard)(void);
     BOOL     (WINAPI *pNtUserEnableMenuItem)( HMENU handle, UINT id, UINT flags );
     BOOL     (WINAPI *pNtUserEndDeferWindowPosEx)( HDWP hdwp, BOOL async );
     BOOL     (WINAPI *pNtUserEndPaint)( HWND hwnd, const PAINTSTRUCT *ps );
@@ -223,6 +230,7 @@ struct unix_funcs
     SHORT    (WINAPI *pNtUserGetAsyncKeyState)( INT key );
     ATOM     (WINAPI *pNtUserGetClassInfoEx)( HINSTANCE instance, UNICODE_STRING *name, WNDCLASSEXW *wc,
                                               struct client_menu_name *menu_name, BOOL ansi );
+    HANDLE   (WINAPI *pNtUserGetClipboardData)( UINT format, struct get_clipboard_params *params );
     BOOL     (WINAPI *pNtUserGetCursorInfo)( CURSORINFO *info );
     HDC      (WINAPI *pNtUserGetDCEx)( HWND hwnd, HRGN clip_rgn, DWORD flags );
     LONG     (WINAPI *pNtUserGetDisplayConfigBufferSizes)( UINT32 flags, UINT32 *num_path_info,
@@ -234,9 +242,12 @@ struct unix_funcs
     BOOL     (WINAPI *pNtUserGetMessage)( MSG *msg, HWND hwnd, UINT first, UINT last );
     INT      (WINAPI *pNtUserGetPriorityClipboardFormat)( UINT *list, INT count );
     DWORD    (WINAPI *pNtUserGetQueueStatus)( UINT flags );
+    HMENU    (WINAPI *pNtUserGetSystemMenu)( HWND hwnd, BOOL revert );
     BOOL     (WINAPI *pNtUserGetUpdateRect)( HWND hwnd, RECT *rect, BOOL erase );
     INT      (WINAPI *pNtUserGetUpdateRgn)( HWND hwnd, HRGN hrgn, BOOL erase );
     BOOL     (WINAPI *pNtUserGetUpdatedClipboardFormats)( UINT *formats, UINT size, UINT *out_size );
+    BOOL     (WINAPI *pNtUserGetWindowPlacement)( HWND hwnd, WINDOWPLACEMENT *placement );
+    BOOL     (WINAPI *pNtUserHideCaret)( HWND hwnd );
     BOOL     (WINAPI *pNtUserIsClipboardFormatAvailable)( UINT format );
     UINT     (WINAPI *pNtUserMapVirtualKeyEx)( UINT code, UINT type, HKL layout );
     LRESULT  (WINAPI *pNtUserMessageCall)( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
@@ -244,6 +255,7 @@ struct unix_funcs
     BOOL     (WINAPI *pNtUserMoveWindow)( HWND hwnd, INT x, INT y, INT cx, INT cy, BOOL repaint );
     DWORD    (WINAPI *pNtUserMsgWaitForMultipleObjectsEx)( DWORD count, const HANDLE *handles,
                                                            DWORD timeout, DWORD mask, DWORD flags );
+    BOOL     (WINAPI *pNtUserOpenClipboard)( HWND hwnd, ULONG unk );
     BOOL     (WINAPI *pNtUserPeekMessage)( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags );
     BOOL     (WINAPI *pNtUserPostMessage)( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam );
     BOOL     (WINAPI *pNtUserPostThreadMessage)( DWORD thread, UINT msg, WPARAM wparam, LPARAM lparam );
@@ -260,22 +272,30 @@ struct unix_funcs
     UINT     (WINAPI *pNtUserSendInput)( UINT count, INPUT *inputs, int size );
     HWND     (WINAPI *pNtUserSetActiveWindow)( HWND hwnd );
     HWND     (WINAPI *pNtUserSetCapture)( HWND hwnd );
+    NTSTATUS (WINAPI *pNtUserSetClipboardData)( UINT format, HANDLE handle,
+                                                struct set_clipboard_params *params );
     DWORD    (WINAPI *pNtUserSetClassLong)( HWND hwnd, INT offset, LONG newval, BOOL ansi );
     ULONG_PTR (WINAPI *pNtUserSetClassLongPtr)( HWND hwnd, INT offset, LONG_PTR newval, BOOL ansi );
     WORD     (WINAPI *pNtUserSetClassWord)( HWND hwnd, INT offset, WORD newval );
+    HWND     (WINAPI *pNtUserSetClipboardViewer)( HWND hwnd );
     HCURSOR  (WINAPI *pNtUserSetCursor)( HCURSOR cursor );
     BOOL     (WINAPI *pNtUserSetCursorIconData)( HCURSOR cursor, UNICODE_STRING *module,
                                                  UNICODE_STRING *res_name, struct cursoricon_desc *desc );
     BOOL     (WINAPI *pNtUserSetCursorPos)( INT x, INT y );
     HWND     (WINAPI *pNtUserSetFocus)( HWND hwnd );
+    void     (WINAPI *pNtUserSetInternalWindowPos)( HWND hwnd, UINT cmd, RECT *rect, POINT *pt );
     BOOL     (WINAPI *pNtUserSetLayeredWindowAttributes)( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags );
+    BOOL     (WINAPI *pNtUserSetMenu)( HWND hwnd, HMENU menu );
     HWND     (WINAPI *pNtUserSetParent)( HWND hwnd, HWND parent );
     BOOL     (WINAPI *pNtUserSetSysColors)( INT count, const INT *colors, const COLORREF *values );
+    BOOL     (WINAPI *pNtUserSetSystemMenu)( HWND hwnd, HMENU menu );
     LONG     (WINAPI *pNtUserSetWindowLong)( HWND hwnd, INT offset, LONG newval, BOOL ansi );
     LONG_PTR (WINAPI *pNtUserSetWindowLongPtr)( HWND hwnd, INT offset, LONG_PTR newval, BOOL ansi );
+    BOOL     (WINAPI *pNtUserSetWindowPlacement)( HWND hwnd, const WINDOWPLACEMENT *wpl );
     BOOL     (WINAPI *pNtUserSetWindowPos)( HWND hwnd, HWND after, INT x, INT y, INT cx, INT cy, UINT flags );
     int      (WINAPI *pNtUserSetWindowRgn)( HWND hwnd, HRGN hrgn, BOOL redraw );
     WORD     (WINAPI *pNtUserSetWindowWord)( HWND hwnd, INT offset, WORD newval );
+    BOOL     (WINAPI *pNtUserShowCaret)( HWND hwnd );
     INT      (WINAPI *pNtUserShowCursor)( BOOL show );
     BOOL     (WINAPI *pNtUserShowWindow)( HWND hwnd, INT cmd );
     BOOL     (WINAPI *pNtUserShowWindowAsync)( HWND hwnd, INT cmd );
@@ -284,6 +304,8 @@ struct unix_funcs
                                                          UINT winini, UINT dpi );
     INT      (WINAPI *pNtUserToUnicodeEx)( UINT virt, UINT scan, const BYTE *state,
                                            WCHAR *str, int size, UINT flags, HKL layout );
+    BOOL     (WINAPI *pNtUserTrackMouseEvent)( TRACKMOUSEEVENT *info );
+    INT      (WINAPI *pNtUserTranslateAccelerator)( HWND hwnd, HACCEL accel, MSG *msg );
     BOOL     (WINAPI *pNtUserTranslateMessage)( const MSG *msg, UINT flags );
     BOOL     (WINAPI *pNtUserUnregisterClass)( UNICODE_STRING *name, HINSTANCE instance,
                                                struct client_menu_name *client_menu_name );
@@ -310,6 +332,7 @@ struct unix_funcs
 };
 
 /* clipboard.c */
+extern UINT enum_clipboard_formats( UINT format ) DECLSPEC_HIDDEN;
 extern void release_clipboard_owner( HWND hwnd ) DECLSPEC_HIDDEN;
 
 /* cursoricon.c */
@@ -337,6 +360,8 @@ extern void register_window_surface( struct window_surface *old,
 /* defwnd.c */
 extern LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
                                     BOOL ansi ) DECLSPEC_HIDDEN;
+extern LRESULT desktop_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
+extern void fill_rect( HDC dc, const RECT *rect, HBRUSH hbrush ) DECLSPEC_HIDDEN;
 
 /* hook.c */
 extern LRESULT call_current_hook( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
@@ -344,19 +369,28 @@ extern LRESULT call_hooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL 
 extern BOOL unhook_windows_hook( INT id, HOOKPROC proc ) DECLSPEC_HIDDEN;
 
 /* input.c */
+extern BOOL destroy_caret(void) DECLSPEC_HIDDEN;
 extern LONG global_key_state_counter DECLSPEC_HIDDEN;
 extern HWND get_active_window(void) DECLSPEC_HIDDEN;
+extern HWND get_capture(void) DECLSPEC_HIDDEN;
 extern BOOL get_cursor_pos( POINT *pt ) DECLSPEC_HIDDEN;
 extern HWND get_focus(void) DECLSPEC_HIDDEN;
 extern DWORD get_input_state(void) DECLSPEC_HIDDEN;
 extern BOOL WINAPI release_capture(void) DECLSPEC_HIDDEN;
 extern BOOL set_capture_window( HWND hwnd, UINT gui_flags, HWND *prev_ret ) DECLSPEC_HIDDEN;
+extern BOOL set_caret_blink_time( unsigned int time ) DECLSPEC_HIDDEN;
+extern BOOL set_caret_pos( int x, int y ) DECLSPEC_HIDDEN;
 extern BOOL set_foreground_window( HWND hwnd, BOOL mouse ) DECLSPEC_HIDDEN;
+extern void toggle_caret( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void update_mouse_tracking_info( HWND hwnd ) DECLSPEC_HIDDEN;
 
 /* menu.c */
 extern HMENU create_menu( BOOL is_popup ) DECLSPEC_HIDDEN;
 extern BOOL draw_menu_bar( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HMENU get_menu( HWND hwnd ) DECLSPEC_HIDDEN;
+extern BOOL get_menu_info( HMENU handle, MENUINFO *info ) DECLSPEC_HIDDEN;
+extern INT get_menu_item_count( HMENU handle ) DECLSPEC_HIDDEN;
+extern BOOL set_window_menu( HWND hwnd, HMENU handle ) DECLSPEC_HIDDEN;
 
 /* message.c */
 extern LRESULT dispatch_message( const MSG *msg, BOOL ansi ) DECLSPEC_HIDDEN;
@@ -378,6 +412,7 @@ extern UINT get_monitor_dpi( HMONITOR monitor ) DECLSPEC_HIDDEN;
 extern BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info ) DECLSPEC_HIDDEN;
 extern UINT get_win_monitor_dpi( HWND hwnd ) DECLSPEC_HIDDEN;
 extern RECT get_primary_monitor_rect( UINT dpi ) DECLSPEC_HIDDEN;
+extern HBRUSH get_sys_color_brush( unsigned int index ) DECLSPEC_HIDDEN;
 extern UINT get_system_dpi(void) DECLSPEC_HIDDEN;
 extern int get_system_metrics( int index ) DECLSPEC_HIDDEN;
 extern UINT get_thread_dpi(void) DECLSPEC_HIDDEN;
@@ -387,6 +422,8 @@ extern BOOL is_exiting_thread( DWORD tid ) DECLSPEC_HIDDEN;
 extern POINT map_dpi_point( POINT pt, UINT dpi_from, UINT dpi_to ) DECLSPEC_HIDDEN;
 extern RECT map_dpi_rect( RECT rect, UINT dpi_from, UINT dpi_to ) DECLSPEC_HIDDEN;
 extern POINT point_phys_to_win_dpi( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
+extern POINT point_thread_to_win_dpi( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
+extern RECT rect_thread_to_win_dpi( HWND hwnd, RECT rect ) DECLSPEC_HIDDEN;
 extern HMONITOR monitor_from_point( POINT pt, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
 extern HMONITOR monitor_from_rect( const RECT *rect, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
 extern HMONITOR monitor_from_window( HWND hwnd, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
@@ -407,7 +444,7 @@ extern HWND get_full_window_handle( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND get_parent( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND get_hwnd_message_parent(void) DECLSPEC_HIDDEN;
 extern DPI_AWARENESS_CONTEXT get_window_dpi_awareness_context( HWND hwnd ) DECLSPEC_HIDDEN;
-extern BOOL get_window_placement( HWND hwnd, WINDOWPLACEMENT *placement ) DECLSPEC_HIDDEN;
+extern MINMAXINFO get_min_max_info( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND get_window_relative( HWND hwnd, UINT rel ) DECLSPEC_HIDDEN;
 extern DWORD get_window_thread( HWND hwnd, DWORD *process ) DECLSPEC_HIDDEN;
 extern HWND is_current_process_window( HWND hwnd ) DECLSPEC_HIDDEN;
@@ -624,13 +661,6 @@ static inline UINT asciiz_to_unicode( WCHAR *dst, const char *src )
 static inline BOOL is_win9x(void)
 {
     return NtCurrentTeb()->Peb->OSPlatformId == VER_PLATFORM_WIN32s;
-}
-
-static inline void init_unicode_string( UNICODE_STRING *str, const WCHAR *data )
-{
-    str->Length = lstrlenW(data) * sizeof(WCHAR);
-    str->MaximumLength = str->Length + sizeof(WCHAR);
-    str->Buffer = (WCHAR *)data;
 }
 
 static inline const char *debugstr_us( const UNICODE_STRING *us )
