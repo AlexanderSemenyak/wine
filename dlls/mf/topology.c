@@ -1841,7 +1841,10 @@ HRESULT WINAPI MFGetTopoNodeCurrentType(IMFTopologyNode *node, DWORD stream, BOO
     switch (node_type)
     {
         case MF_TOPOLOGY_OUTPUT_NODE:
-            if (SUCCEEDED(topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
+            if (output || stream)
+                return MF_E_INVALIDSTREAMNUMBER;
+
+            if (SUCCEEDED(hr = topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
             {
                 hr = IMFStreamSink_GetMediaTypeHandler(stream_sink, &type_handler);
                 IMFStreamSink_Release(stream_sink);
@@ -1854,6 +1857,9 @@ HRESULT WINAPI MFGetTopoNodeCurrentType(IMFTopologyNode *node, DWORD stream, BOO
             }
             break;
         case MF_TOPOLOGY_SOURCESTREAM_NODE:
+            if (!output || stream)
+                return MF_E_INVALIDSTREAMNUMBER;
+
             if (FAILED(hr = IMFTopologyNode_GetUnknown(node, &MF_TOPONODE_STREAM_DESCRIPTOR, &IID_IMFStreamDescriptor,
                     (void **)&sd)))
             {
@@ -2359,6 +2365,7 @@ static HRESULT topology_loader_resolve_branch(struct topoloader_context *context
     };
     MF_TOPOLOGY_TYPE u_type, d_type;
     IMFTopologyNode *node;
+    HRESULT hr;
     TOPOID id;
 
     /* Downstream node might have already been cloned. */
@@ -2372,10 +2379,13 @@ static HRESULT topology_loader_resolve_branch(struct topoloader_context *context
     if (!connectors[u_type][d_type])
     {
         WARN("Unsupported branch kind %d -> %d.\n", u_type, d_type);
+        IMFTopologyNode_Release(node);
         return E_FAIL;
     }
 
-    return connectors[u_type][d_type](context, upstream_node, output_index, node, input_index);
+    hr = connectors[u_type][d_type](context, upstream_node, output_index, node, input_index);
+    IMFTopologyNode_Release(node);
+    return hr;
 }
 
 static HRESULT topology_loader_resolve_nodes(struct topoloader_context *context, unsigned int *layer_size)
@@ -2391,19 +2401,25 @@ static HRESULT topology_loader_resolve_nodes(struct topoloader_context *context,
     {
         ++size;
 
-        IMFTopology_GetNodeByID(context->input_topology, id, &orig_node);
-
         IMFTopologyNode_GetNodeType(node, &node_type);
         switch (node_type)
         {
             case MF_TOPOLOGY_SOURCESTREAM_NODE:
-                if (FAILED(IMFTopologyNode_GetOutput(orig_node, 0, &downstream_node, &input_index)))
+                if (SUCCEEDED(hr = IMFTopology_GetNodeByID(context->input_topology, id, &orig_node)))
+                {
+                    hr = IMFTopologyNode_GetOutput(orig_node, 0, &downstream_node, &input_index);
+                    IMFTopologyNode_Release(orig_node);
+                }
+
+                if (FAILED(hr))
                 {
                     IMFTopology_RemoveNode(context->output_topology, node);
+                    IMFTopologyNode_Release(node);
                     continue;
                 }
 
                 hr = topology_loader_resolve_branch(context, node, 0, downstream_node, input_index);
+                IMFTopologyNode_Release(downstream_node);
                 break;
             case MF_TOPOLOGY_TRANSFORM_NODE:
             case MF_TOPOLOGY_TEE_NODE:
@@ -2414,6 +2430,7 @@ static HRESULT topology_loader_resolve_nodes(struct topoloader_context *context,
         }
 
         IMFTopologyNode_DeleteItem(node, &context->key);
+        IMFTopologyNode_Release(node);
 
         if (FAILED(hr))
             break;
@@ -2661,10 +2678,13 @@ static HRESULT WINAPI topology_loader_Load(IMFTopoLoader *iface, IMFTopology *in
             break;
     }
 
-    if (SUCCEEDED(hr))
+    if (FAILED(hr))
+        IMFTopology_Release(output_topology);
+    else
+    {
         topology_loader_resolve_complete(&context);
-
-    *ret_topology = output_topology;
+        *ret_topology = output_topology;
+    }
 
     return hr;
 }

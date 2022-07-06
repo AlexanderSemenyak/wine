@@ -2251,6 +2251,14 @@ void WINAPI ExUnregisterCallback(void *callback_registration)
 }
 
 /***********************************************************************
+ *           ExNotifyCallback   (NTOSKRNL.EXE.@)
+ */
+void WINAPI ExNotifyCallback(void *obj, void *arg1, void *arg2)
+{
+    FIXME("(%p, %p, %p): stub\n", obj, arg1, arg2);
+}
+
+/***********************************************************************
  *           ExFreePool   (NTOSKRNL.EXE.@)
  */
 void WINAPI ExFreePool( void *ptr )
@@ -2599,6 +2607,15 @@ ULONGLONG WINAPI KeQueryInterruptTime( void )
     return totaltime.QuadPart;
 }
 
+/***********************************************************************
+ *           KeQueryPriorityThread   (NTOSKRNL.EXE.@)
+ */
+KPRIORITY WINAPI KeQueryPriorityThread( PKTHREAD Thread )
+{
+    FIXME("(%p): stub.\n", Thread);
+    /* priority must be a value between 0 and 31 */
+    return 15;
+}
 
 /***********************************************************************
  *           KeQuerySystemTime   (NTOSKRNL.EXE.@)
@@ -4446,6 +4463,20 @@ NTSTATUS WINAPI KdEnableDebugger(void)
     FIXME(": stub.\n");
     return STATUS_DEBUGGER_INACTIVE;
 }
+
+#ifdef __x86_64__
+
+void WINAPI KfRaiseIrql(KIRQL new, KIRQL *old)
+{
+    FIXME("new %u old %p: stub.\n", new, old);
+}
+
+void WINAPI KeLowerIrql(KIRQL new)
+{
+    FIXME("new %u: stub.\n", new);
+}
+
+#endif
 
 /*****************************************************
  *           DllMain

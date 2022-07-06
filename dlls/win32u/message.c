@@ -1346,7 +1346,7 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
         else if (msg->message == WM_KEYUP)
         {
             /* Handle VK_APPS key by posting a WM_CONTEXTMENU message */
-            if (msg->wParam == VK_APPS && user_callbacks && !user_callbacks->is_menu_active())
+            if (msg->wParam == VK_APPS && !is_menu_active())
                 NtUserPostMessage( msg->hwnd, WM_CONTEXTMENU, (WPARAM)msg->hwnd, -1 );
         }
     }
@@ -1420,7 +1420,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     }
 
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
-    set_thread_dpi_awareness_context( get_window_dpi_awareness_context( msg->hwnd ));
+    SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( msg->hwnd ));
 
     /* FIXME: is this really the right place for this hook? */
     event.message = msg->message;
@@ -1599,17 +1599,17 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
     get_user_thread_info()->msg_source.originId   = msg_data->source.origin;
 
     /* hardware messages are always in physical coords */
-    context = set_thread_dpi_awareness_context( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
+    context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
 
     if (msg->message == WM_INPUT || msg->message == WM_INPUT_DEVICE_CHANGE)
-        ret = user_callbacks && user_callbacks->process_rawinput_message( msg, hw_id, msg_data );
+        ret = process_rawinput_message( msg, hw_id, msg_data );
     else if (is_keyboard_message( msg->message ))
         ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
     else if (is_mouse_message( msg->message ))
         ret = process_mouse_message( msg, hw_id, msg_data->info, hwnd_filter, first, last, remove );
     else
         ERR( "unknown message type %x\n", msg->message );
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return ret;
 }
 
@@ -2381,9 +2381,8 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
             hid_usage_page = ((USAGE *)rawinput->data.hid.bRawData)[0];
             hid_usage = ((USAGE *)rawinput->data.hid.bRawData)[1];
         }
-        if (input->hi.uMsg == WM_INPUT && user_callbacks &&
-            !user_callbacks->rawinput_device_get_usages( rawinput->header.hDevice,
-                                                         &hid_usage_page, &hid_usage ))
+        if (input->hi.uMsg == WM_INPUT &&
+            !rawinput_device_get_usages( rawinput->header.hDevice, &hid_usage_page, &hid_usage ))
         {
             WARN( "unable to get HID usages for device %p\n", rawinput->header.hDevice );
             return STATUS_INVALID_HANDLE;
@@ -2890,15 +2889,25 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
 {
     switch (type)
     {
+    case NtUserScrollBarWndProc:
+        return scroll_bar_window_proc( hwnd, msg, wparam, lparam, ansi );
+
+    case NtUserPopupMenuWndProc:
+        return popup_menu_window_proc( hwnd, msg, wparam, lparam );
+
     case NtUserDesktopWindowProc:
         return desktop_window_proc( hwnd, msg, wparam, lparam );
+
     case NtUserDefWindowProc:
         return default_window_proc( hwnd, msg, wparam, lparam, ansi );
+
     case NtUserCallWindowProc:
         return init_win_proc_params( (struct win_proc_params *)result_info, hwnd, msg,
                                      wparam, lparam, ansi );
+
     case NtUserSendMessage:
         return send_window_message( hwnd, msg, wparam, lparam, ansi );
+
     case NtUserSendMessageTimeout:
         {
             struct send_message_timeout_params *params = (void *)result_info;
@@ -2907,16 +2916,24 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
                                                    params->timeout, &res, ansi );
             return res;
         }
+
     case NtUserSendNotifyMessage:
         return send_notify_message( hwnd, msg, wparam, lparam, ansi );
+
     case NtUserSendMessageCallback:
         return send_message_callback( hwnd, msg, wparam, lparam, (void *)result_info, ansi );
+
+    case NtUserClipboardWindowProc:
+        return user_driver->pClipboardWindowProc( hwnd, msg, wparam, lparam );
+
     case NtUserSpyEnter:
         spy_enter_message( ansi, hwnd, msg, wparam, lparam );
         return 0;
+
     case NtUserSpyExit:
         spy_exit_message( ansi, hwnd, msg, (LPARAM)result_info, wparam, lparam );
         return 0;
+
     default:
         FIXME( "%p %x %lx %lx %p %x %x\n", hwnd, msg, wparam, lparam, result_info, type, ansi );
     }

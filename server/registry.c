@@ -803,12 +803,11 @@ static struct key *open_key( struct key *key, const struct unicode_str *name, un
 static struct key *create_key( struct key *key, const struct unicode_str *name,
                                const struct unicode_str *class, unsigned int options,
                                unsigned int access, unsigned int attributes,
-                               const struct security_descriptor *sd, int *created )
+                               const struct security_descriptor *sd )
 {
     int index;
     struct unicode_str token, next;
 
-    *created = 0;
     if (!(key = open_key_prefix( key, name, access, &token, &index ))) return NULL;
 
     if (!token.len)  /* the key already exists */
@@ -827,6 +826,7 @@ static struct key *create_key( struct key *key, const struct unicode_str *name,
         if (debug_level > 1) dump_operation( key, NULL, "Open" );
         if (key->flags & KEY_PREDEF) set_error( STATUS_PREDEFINED_HANDLE );
         grab_object( key );
+        set_error( STATUS_OBJECT_NAME_EXISTS );
         return key;
     }
 
@@ -844,7 +844,6 @@ static struct key *create_key( struct key *key, const struct unicode_str *name,
         set_error( STATUS_CHILD_MUST_BE_VOLATILE );
         return NULL;
     }
-    *created = 1;
     make_dirty( key );
     if (!(key = alloc_subkey( key, &token, index, current_time ))) return NULL;
 
@@ -1005,6 +1004,64 @@ static void enum_key( struct key *key, int index, int info_class, struct enum_ke
     }
     free( fullname );
     if (debug_level > 1) dump_operation( key, NULL, "Enum" );
+}
+
+/* rename a key and its values */
+static int rename_key( struct key *key, const struct unicode_str *new_name )
+{
+    struct unicode_str token, name;
+    struct key *subkey;
+    int i, index, cur_index;
+    WCHAR *ptr;
+
+    token.str = NULL;
+    if (is_wow6432node( key->name, key->namelen ))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return -1;
+    }
+
+    /* changing to a path is not allowed */
+    if (!new_name->len || !get_path_token( new_name, &token ) || token.len != new_name->len)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return -1;
+    }
+
+    /* check for existing subkey with the same name */
+    if (!key->parent || (subkey = find_subkey( key->parent, new_name, &index )))
+    {
+        set_error( STATUS_CANNOT_DELETE );
+        return -1;
+    }
+
+    if (!(ptr = memdup( new_name->str, new_name->len ))) return -1;
+
+    name.str = key->name;
+    name.len = key->namelen;
+    find_subkey( key->parent, &name, &cur_index );
+
+    if (cur_index < index && (index - cur_index) > 1)
+    {
+        --index;
+        for (i = cur_index; i < index; ++i)
+            key->parent->subkeys[i] = key->parent->subkeys[i+1];
+    }
+    else if (cur_index > index)
+    {
+        for (i = cur_index; i > index; --i)
+            key->parent->subkeys[i] = key->parent->subkeys[i-1];
+    }
+    key->parent->subkeys[index] = key;
+
+    free( key->name );
+    key->name = ptr;
+    key->namelen = new_name->len;
+
+    if (debug_level > 1) dump_operation( key, NULL, "Rename" );
+    make_dirty( key );
+    touch_key( key, REG_NOTIFY_CHANGE_NAME );
+    return 0;
 }
 
 /* delete a key and its values */
@@ -2154,7 +2211,7 @@ DECL_HANDLER(create_key)
     if ((parent = get_parent_hkey_obj( objattr->rootdir )))
     {
         if ((key = create_key( parent, &name, &class, req->options, access,
-                               objattr->attributes, sd, &reply->created )))
+                               objattr->attributes, sd )))
         {
             reply->hkey = alloc_handle( current->process, key, access, objattr->attributes );
             release_object( key );
@@ -2214,8 +2271,7 @@ DECL_HANDLER(enum_key)
 {
     struct key *key;
 
-    if ((key = get_hkey_obj( req->hkey,
-                             req->index == -1 ? KEY_QUERY_VALUE : KEY_ENUMERATE_SUB_KEYS )))
+    if ((key = get_hkey_obj( req->hkey, req->index == -1 ? 0 : KEY_ENUMERATE_SUB_KEYS )))
     {
         enum_key( key, req->index, req->info_class, reply );
         release_object( key );
@@ -2310,8 +2366,7 @@ DECL_HANDLER(load_registry)
 
     if ((parent = get_parent_hkey_obj( objattr->rootdir )))
     {
-        int dummy;
-        if ((key = create_key( parent, &name, NULL, 0, KEY_WOW64_64KEY, 0, sd, &dummy )))
+        if ((key = create_key( parent, &name, NULL, 0, KEY_WOW64_64KEY, 0, sd )))
         {
             load_registry( key, req->file );
             release_object( key );
@@ -2410,6 +2465,22 @@ DECL_HANDLER(set_registry_notification)
             }
             release_object( event );
         }
+        release_object( key );
+    }
+}
+
+/* rename a registry key */
+DECL_HANDLER(rename_key)
+{
+    struct unicode_str name;
+    struct key *key;
+
+    key = get_hkey_obj( req->hkey, KEY_WRITE );
+    if (key)
+    {
+        name.str = get_req_data();
+        name.len = (get_req_data_size() / sizeof(WCHAR)) * sizeof(WCHAR);
+        rename_key( key, &name );
         release_object( key );
     }
 }

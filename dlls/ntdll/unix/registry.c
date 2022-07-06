@@ -81,6 +81,7 @@ NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
 
     *key = 0;
     if (attr->Length != sizeof(OBJECT_ATTRIBUTES)) return STATUS_INVALID_PARAMETER;
+    if (!attr->ObjectName->Length && !attr->RootDirectory) return STATUS_OBJECT_PATH_SYNTAX_BAD;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     TRACE( "(%p,%s,%s,%x,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName),
@@ -94,9 +95,18 @@ NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
         if (class) wine_server_add_data( req, class->Buffer, class->Length );
         ret = wine_server_call( req );
         *key = wine_server_ptr_handle( reply->hkey );
-        if (dispos && !ret) *dispos = reply->created ? REG_CREATED_NEW_KEY : REG_OPENED_EXISTING_KEY;
     }
     SERVER_END_REQ;
+
+    if (ret == STATUS_OBJECT_NAME_EXISTS)
+    {
+        if (dispos) *dispos = REG_OPENED_EXISTING_KEY;
+        ret = STATUS_SUCCESS;
+    }
+    else if (ret == STATUS_SUCCESS)
+    {
+        if (dispos) *dispos = REG_CREATED_NEW_KEY;
+    }
 
     TRACE( "<- %p\n", *key );
     free( objattr );
@@ -199,10 +209,23 @@ NTSTATUS WINAPI NtDeleteKey( HANDLE key )
 /******************************************************************************
  *              NtRenameKey  (NTDLL.@)
  */
-NTSTATUS WINAPI NtRenameKey( HANDLE handle, UNICODE_STRING *name )
+NTSTATUS WINAPI NtRenameKey( HANDLE key, UNICODE_STRING *name )
 {
-    FIXME( "(%p %s)\n", handle, debugstr_us(name) );
-    return STATUS_NOT_IMPLEMENTED;
+    NTSTATUS ret;
+
+    TRACE( "(%p %s)\n", key, debugstr_us(name) );
+
+    if (!name) return STATUS_ACCESS_VIOLATION;
+    if (!name->Buffer || !name->Length) return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( rename_key )
+    {
+        req->hkey = wine_server_obj_handle( key );
+        wine_server_add_data( req, name->Buffer, name->Length );
+        ret = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return ret;
 }
 
 
@@ -686,6 +709,7 @@ NTSTATUS WINAPI NtLoadKey( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *fil
         req->file = wine_server_obj_handle( key );
         wine_server_add_data( req, objattr, len );
         ret = wine_server_call( req );
+        if (ret == STATUS_OBJECT_NAME_EXISTS) ret = STATUS_SUCCESS;
     }
     SERVER_END_REQ;
 

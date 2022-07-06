@@ -100,6 +100,16 @@ struct hook_info
     WCHAR module[MAX_PATH];
 };
 
+static CRITICAL_SECTION api_hook_cs;
+static CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &api_hook_cs,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": api_hook_cs") }
+};
+static CRITICAL_SECTION api_hook_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
+
+
 #define WH_WINEVENT (WH_MAXHOOK+1)
 
 static const char * const hook_names[WH_WINEVENT - WH_MINHOOK + 1] =
@@ -289,14 +299,14 @@ static LRESULT call_hook_proc( HOOKPROC proc, INT id, INT code, WPARAM wparam, L
 {
     LRESULT ret;
 
-    TRACE_(relay)( "\1Call hook proc %p (id=%s,code=%x,wp=%08lx,lp=%08lx)\n",
+    TRACE_(relay)( "\1Call hook proc %p (id=%s,code=%x,wp=%08Ix,lp=%08Ix)\n",
                    proc, hook_names[id-WH_MINHOOK], code, wparam, lparam );
 
     if (!prev_unicode == !next_unicode) ret = proc( code, wparam, lparam );
     else if (prev_unicode) ret = call_hook_WtoA( proc, id, code, wparam, lparam );
     else ret = call_hook_AtoW( proc, id, code, wparam, lparam );
 
-    TRACE_(relay)( "\1Ret  hook proc %p (id=%s,code=%x,wp=%08lx,lp=%08lx) retval=%08lx\n",
+    TRACE_(relay)( "\1Ret  hook proc %p (id=%s,code=%x,wp=%08Ix,lp=%08Ix) retval=%08Ix\n",
                    proc, hook_names[id-WH_MINHOOK], code, wparam, lparam, ret );
 
     return ret;
@@ -321,21 +331,6 @@ void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module )
         if (!(mod = LoadLibraryExW(module, NULL, LOAD_WITH_ALTERED_SEARCH_PATH))) return NULL;
     }
     return (char *)mod + (ULONG_PTR)proc;
-}
-
-
-/***********************************************************************
- *		HOOK_CallHooks
- */
-LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode )
-{
-    struct win_hook_params params;
-    params.id = id;
-    params.code = code;
-    params.wparam = wparam;
-    params.lparam = lparam;
-    params.next_unicode = unicode;
-    return NtUserCallOneParam( (UINT_PTR)&params, NtUserCallHooks );
 }
 
 
@@ -409,7 +404,7 @@ HWINEVENTHOOK WINAPI SetWinEventHook(DWORD event_min, DWORD event_max,
     UNICODE_STRING str;
     DWORD len = 0;
 
-    TRACE("%d,%d,%p,%p,%08x,%04x,%08x\n", event_min, event_max, inst,
+    TRACE("%ld,%ld,%p,%p,%08lx,%04lx,%08lx\n", event_min, event_max, inst,
           proc, pid, tid, flags);
 
     if (inst && (!(len = GetModuleFileNameW( inst, module, MAX_PATH )) || len >= MAX_PATH))
@@ -429,14 +424,14 @@ BOOL WINAPI User32CallWinEventHook( const struct win_event_hook_params *params, 
 
     if (params->module[0] && !(proc = get_hook_proc( proc, params->module, &free_module ))) return FALSE;
 
-    TRACE_(relay)( "\1Call winevent hook proc %p (hhook=%p,event=%x,hwnd=%p,object_id=%x,child_id=%x,tid=%04x,time=%x)\n",
+    TRACE_(relay)( "\1Call winevent hook proc %p (hhook=%p,event=%lx,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04lx,time=%lx)\n",
                    proc, params->handle, params->event, params->hwnd, params->object_id,
                    params->child_id, params->tid, params->time );
 
     proc( params->handle, params->event, params->hwnd, params->object_id, params->child_id,
           params->tid, params->time );
 
-    TRACE_(relay)( "\1Ret  winevent hook proc %p (hhook=%p,event=%x,hwnd=%p,object_id=%x,child_id=%x,tid=%04x,time=%x)\n",
+    TRACE_(relay)( "\1Ret  winevent hook proc %p (hhook=%p,event=%lx,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04lx,time=%lx)\n",
                    proc, params->handle, params->event, params->hwnd, params->object_id,
                    params->child_id, params->tid, params->time );
 
@@ -477,7 +472,7 @@ BOOL WINAPI User32CallWindowsHook( const struct win_hook_params *params, ULONG s
 BOOL WINAPI IsWinEventHookInstalled(DWORD dwEvent)
 {
     /* FIXME: Needed by Office 2007 installer */
-    WARN("(%d)-stub!\n", dwEvent);
+    WARN("(%ld)-stub!\n", dwEvent);
     return TRUE;
 }
 
@@ -487,12 +482,12 @@ BOOL WINAPI RegisterUserApiHook(const struct user_api_hook *new_hook, struct use
     if (!new_hook)
         return FALSE;
 
-    USER_Lock();
+    EnterCriticalSection( &api_hook_cs );
     hooked_user_api = *new_hook;
     user_api = &hooked_user_api;
     if (old_hook)
         *old_hook = original_user_api;
-    USER_Unlock();
+    LeaveCriticalSection( &api_hook_cs );
     return TRUE;
 }
 

@@ -802,7 +802,7 @@ static void test_simple_joystick( DWORD version )
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
     if (FAILED(hr = dinput_test_create_device( version, &devinst, &device ))) goto done;
@@ -1252,7 +1252,6 @@ static void test_simple_joystick( DWORD version )
 
     hwnd = CreateWindowW( L"static", L"dinput", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 10, 10, 200, 200,
                           NULL, NULL, NULL, NULL );
-    SetForegroundWindow( hwnd );
 
     hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE );
     ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
@@ -1261,6 +1260,8 @@ static void test_simple_joystick( DWORD version )
     hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_EXCLUSIVE );
     ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
 
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE );
+    ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_NOEFFECT, "Unacquire returned: %#lx\n", hr );
     hr = IDirectInputDevice8_Acquire( device );
@@ -1681,8 +1682,8 @@ static void test_simple_joystick( DWORD version )
 
     hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
     ok( hr == DI_OK, "GetDeviceState returned: %#lx\n", hr );
-    check_member( state, expect_state_abs[1], "%ld", lX );
-    check_member( state, expect_state_abs[1], "%ld", lY );
+    ok( state.lX == expect_state_abs[1].lX || broken( state.lX == 16853 ) /* w8 */, "got lX %ld", state.lX );
+    ok( state.lY == expect_state_abs[1].lY || broken( state.lY == 16853 ) /* w8 */, "got lY %ld", state.lY );
     check_member( state, expect_state_abs[1], "%ld", lZ );
     check_member( state, expect_state_abs[1], "%ld", lRx );
     check_member( state, expect_state_abs[1], "%ld", rgdwPOV[0] );
@@ -2575,7 +2576,7 @@ static BOOL test_device_types( DWORD version )
         desc.caps = device_desc[i].hid_caps;
         desc.report_descriptor_len = device_desc[i].report_desc_len;
         memcpy( desc.report_descriptor_buf, device_desc[i].report_desc_buf, device_desc[i].report_desc_len );
-        fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+        fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
         if (!hid_device_start( &desc ))
         {
@@ -3022,7 +3023,7 @@ static void test_many_axes_joystick(void)
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
     if (FAILED(hr = dinput_test_create_device( DIRECTINPUT_VERSION, &devinst, &device ))) goto done;
@@ -3364,7 +3365,7 @@ static void test_driving_wheel_axes(void)
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
     if (FAILED(hr = dinput_test_create_device( DIRECTINPUT_VERSION, &devinst, &device ))) goto done;
@@ -3600,7 +3601,7 @@ static BOOL test_winmm_joystick(void)
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
 
@@ -4022,7 +4023,7 @@ static void test_windows_gaming_input(void)
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
     WaitForSingleObject( controller_added.event, INFINITE );
@@ -4097,7 +4098,7 @@ static void test_windows_gaming_input(void)
 
     desc.report_descriptor_len = sizeof(wheel_threepedals_desc);
     memcpy( desc.report_descriptor_buf, wheel_threepedals_desc, sizeof(wheel_threepedals_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     controller_added.event = CreateEventW( NULL, FALSE, FALSE, NULL );
     ok( !!controller_added.event, "CreateEventW failed, error %lu\n", GetLastError() );
@@ -4162,10 +4163,9 @@ done:
 
 START_TEST( joystick8 )
 {
-    if (!dinput_test_init()) return;
+    dinput_test_init();
     if (!bus_device_start()) goto done;
 
-    CoInitialize( NULL );
     if (test_device_types( 0x800 ))
     {
         /* This needs to be done before doing anything involving dinput.dll
@@ -4183,7 +4183,6 @@ START_TEST( joystick8 )
         test_driving_wheel_axes();
         test_windows_gaming_input();
     }
-    CoUninitialize();
 
 done:
     bus_device_stop();

@@ -4300,6 +4300,7 @@ static void init_vulkan_format_info(struct wined3d_format_vk *format,
         {WINED3DFMT_B8G8R8A8_UNORM_SRGB,        VK_FORMAT_B8G8R8A8_SRGB,           },
         {WINED3DFMT_B8G8R8X8_UNORM,             VK_FORMAT_B8G8R8A8_UNORM,          "XYZ1"},
         {WINED3DFMT_B8G8R8X8_UNORM_SRGB,        VK_FORMAT_B8G8R8A8_SRGB,           "XYZ1"},
+        {WINED3DFMT_B5G6R5_UNORM,               VK_FORMAT_R5G6B5_UNORM_PACK16,     },
         {WINED3DFMT_BC1_UNORM,                  VK_FORMAT_BC1_RGBA_UNORM_BLOCK,    },
         {WINED3DFMT_BC1_UNORM_SRGB,             VK_FORMAT_BC1_RGBA_SRGB_BLOCK,     },
         {WINED3DFMT_BC2_UNORM,                  VK_FORMAT_BC2_UNORM_BLOCK,         },
@@ -4395,6 +4396,11 @@ static void init_vulkan_format_info(struct wined3d_format_vk *format,
     if (texture_flags & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)
     {
         caps |= WINED3D_FORMAT_CAP_UNORDERED_ACCESS;
+    }
+    if ((texture_flags & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)
+            && (texture_flags & VK_FORMAT_FEATURE_TRANSFER_DST_BIT))
+    {
+        caps |= WINED3D_FORMAT_CAP_BLIT;
     }
 
     if (!(~caps & (WINED3D_FORMAT_CAP_RENDERTARGET | WINED3D_FORMAT_CAP_FILTERING)))
@@ -6009,6 +6015,25 @@ uint32_t wined3d_format_pack(const struct wined3d_format *format, const struct w
     return p;
 }
 
+void wined3d_format_colour_to_vk(const struct wined3d_format *format, const struct wined3d_color *c,
+        VkClearColorValue *retval)
+{
+    if (format->attrs & WINED3D_FORMAT_ATTR_INTEGER)
+    {
+        retval->int32[0] = c->r;
+        retval->int32[1] = c->g;
+        retval->int32[2] = c->b;
+        retval->int32[3] = c->a;
+    }
+    else
+    {
+        retval->float32[0] = c->r;
+        retval->float32[1] = c->g;
+        retval->float32[2] = c->b;
+        retval->float32[3] = c->a;
+    }
+}
+
 /* Note: It's the caller's responsibility to ensure values can be expressed
  * in the requested format. UNORM formats for example can only express values
  * in the range 0.0f -> 1.0f.
@@ -6133,8 +6158,10 @@ void wined3d_format_convert_from_float(const struct wined3d_format *format,
         return;
     }
 
-    /* 32 bit float formats. We don't handle D32_FLOAT and D32_FLOAT_S8X24_UINT for now. */
-    if ((format->attrs & WINED3D_FORMAT_ATTR_FLOAT) && format->red_size == 32)
+    /* 32 bit float formats. We don't handle D32_FLOAT_S8X24_UINT for now. */
+    if ((format->attrs & WINED3D_FORMAT_ATTR_FLOAT)
+            && (format->red_size == 32 || format->depth_size == 32)
+            && !format->stencil_size)
     {
         float *ret_f = ret;
 

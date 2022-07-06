@@ -181,6 +181,7 @@ extern struct dce *get_dc_dce( HDC hdc ) DECLSPEC_HIDDEN;
 extern void set_dc_dce( HDC hdc, struct dce *dce ) DECLSPEC_HIDDEN;
 extern WORD set_dce_flags( HDC hdc, WORD flags ) DECLSPEC_HIDDEN;
 extern DWORD set_stretch_blt_mode( HDC hdc, DWORD mode ) DECLSPEC_HIDDEN;
+extern BOOL set_viewport_org( HDC hdc, INT x, INT y, POINT *point ) DECLSPEC_HIDDEN;
 extern void DC_InitDC( DC * dc ) DECLSPEC_HIDDEN;
 extern void DC_UpdateXforms( DC * dc ) DECLSPEC_HIDDEN;
 
@@ -390,7 +391,6 @@ extern void lp_to_dp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern BOOL set_map_mode( DC *dc, int mode ) DECLSPEC_HIDDEN;
 extern void combine_transform( XFORM *result, const XFORM *xform1,
                                const XFORM *xform2 ) DECLSPEC_HIDDEN;
-extern int muldiv( int a, int b, int c ) DECLSPEC_HIDDEN;
 
 /* driver.c */
 extern BOOL is_display_device( LPCWSTR name ) DECLSPEC_HIDDEN;

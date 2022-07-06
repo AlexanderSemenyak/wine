@@ -274,7 +274,13 @@ void free_dc_ptr( DC *dc )
     GDI_dec_ref_count( dc->hPen );
     GDI_dec_ref_count( dc->hBrush );
     GDI_dec_ref_count( dc->hFont );
-    if (dc->hBitmap) GDI_dec_ref_count( dc->hBitmap );
+    if (dc->hBitmap)
+    {
+        if (dc->is_display)
+            NtGdiDeleteClientObj( dc->hBitmap );
+        else
+            GDI_dec_ref_count( dc->hBitmap );
+    }
     free_gdi_handle( dc->hSelf );
     free_dc_state( dc );
 }
@@ -724,7 +730,10 @@ HDC WINAPI NtGdiOpenDCW( UNICODE_STRING *device, const DEVMODEW *devmode, UNICOD
     if (!(dc = alloc_dc_ptr( NTGDI_OBJ_DC ))) return 0;
     hdc = dc->hSelf;
 
-    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
+    if (is_display)
+        dc->hBitmap = NtGdiCreateClientObj( NTGDI_OBJ_SURF );
+    else
+        dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
 
     TRACE("(device=%s, output=%s): returning %p\n",
           debugstr_us(device), debugstr_us(output), dc->hSelf );
@@ -923,6 +932,11 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
         set_bk_color( dc, value );
         break;
 
+    case NtGdiSetBkMode:
+        prev = dc->attr->background_mode;
+        dc->attr->background_mode = value;
+        break;
+
     case NtGdiSetTextColor:
         prev = dc->attr->text_color;
         set_text_color( dc, value );
@@ -945,6 +959,16 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
     case NtGdiSetGraphicsMode:
         prev = dc->attr->graphics_mode;
         ret = set_graphics_mode( dc, value );
+        break;
+
+    case NtGdiSetROP2:
+        prev = dc->attr->rop_mode;
+        dc->attr->rop_mode = value;
+        break;
+
+    case NtGdiSetTextAlign:
+        prev = dc->attr->text_align;
+        dc->attr->text_align = value;
         break;
 
     default:
@@ -1076,6 +1100,19 @@ BOOL WINAPI NtGdiSetBrushOrg( HDC hdc, INT x, INT y, POINT *oldorg )
     dc->attr->brush_org.y = y;
     release_dc_ptr( dc );
     return TRUE;
+}
+
+
+BOOL set_viewport_org( HDC hdc, INT x, INT y, POINT *point )
+{
+    DC *dc;
+
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+    if (point) *point = dc->attr->vport_org;
+    dc->attr->vport_org.x = x;
+    dc->attr->vport_org.y = y;
+    release_dc_ptr( dc );
+    return NtGdiComputeXformCoefficients( hdc );
 }
 
 

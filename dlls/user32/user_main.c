@@ -32,6 +32,7 @@
 #include "user_private.h"
 #include "win.h"
 #include "wine/debug.h"
+#include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(graphics);
 WINE_DECLARE_DEBUG_CHANNEL(message);
@@ -41,24 +42,6 @@ HMODULE user32_module = 0;
 static DWORD exiting_thread_id;
 
 extern void WDML_NotifyThreadDetach(void);
-
-/***********************************************************************
- *           USER_Lock
- */
-void USER_Lock(void)
-{
-    NtUserCallOneParam( 0, NtUserLock );
-}
-
-
-/***********************************************************************
- *           USER_Unlock
- */
-void USER_Unlock(void)
-{
-    NtUserCallOneParam( 1, NtUserLock );
-}
-
 
 /***********************************************************************
  *           USER_CheckNotLock
@@ -93,7 +76,7 @@ static void dpiaware_init(void)
     if (!LdrQueryImageFileExecutionOptions( &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName,
                                             L"dpiAwareness", REG_DWORD, &option, sizeof(option), NULL ))
     {
-        TRACE( "got option %x\n", option );
+        TRACE( "got option %lx\n", option );
         if (option <= 2)
         {
             SetProcessDpiAwarenessContext( (DPI_AWARENESS_CONTEXT)~(ULONG_PTR)option );
@@ -152,32 +135,63 @@ static void WINAPI unregister_imm( HWND hwnd )
     imm_unregister_window( hwnd );
 }
 
-static void CDECL free_win_ptr( WND *win )
+static NTSTATUS try_finally( NTSTATUS (CDECL *func)( void *), void *arg,
+                             void (CALLBACK *finally_func)( BOOL ))
 {
-    HeapFree( GetProcessHeap(), 0, win->pScroll );
+    NTSTATUS status;
+    __TRY
+    {
+        status = func( arg );
+    }
+    __FINALLY( finally_func );
+    return status;
 }
 
 static const struct user_callbacks user_funcs =
 {
-    EndMenu,
     ImmProcessKey,
     ImmTranslateMessage,
-    free_win_ptr,
-    MENU_GetSysMenu,
-    MENU_IsMenuActive,
+    NtWaitForMultipleObjects,
     notify_ime,
     post_dde_message,
-    process_rawinput_message,
-    rawinput_device_get_usages,
-    SCROLL_SetStandardScrollPainted,
     unpack_dde_message,
     register_imm,
     unregister_imm,
+    try_finally,
 };
 
 static NTSTATUS WINAPI User32CopyImage( const struct copy_image_params *params, ULONG size )
 {
     HANDLE ret = CopyImage( params->hwnd, params->type, params->dx, params->dy, params->flags );
+    return HandleToUlong( ret );
+}
+
+static NTSTATUS WINAPI User32DrawScrollBar( const struct draw_scroll_bar_params *params, ULONG size )
+{
+    RECT rect = params->rect;
+    user_api->pScrollBarDraw( params->hwnd, params->hdc, params->bar, params->hit_test,
+                              &params->tracking_info, params->arrows, params->interior,
+                              &rect, params->enable_flags, params->arrow_size, params->thumb_pos,
+                              params->thumb_size, params->vertical );
+    return 0;
+}
+
+static NTSTATUS WINAPI User32DrawText( const struct draw_text_params *params, ULONG size )
+{
+    size -= FIELD_OFFSET( struct draw_text_params, str );
+    return DrawTextW( params->hdc, params->str, size / sizeof(WCHAR), params->rect, params->flags );
+}
+
+static NTSTATUS WINAPI User32LoadImage( const struct load_image_params *params, ULONG size )
+{
+    HANDLE ret = LoadImageW( params->hinst, params->name, params->type,
+                             params->dx, params->dy, params->flags );
+    return HandleToUlong( ret );
+}
+
+static NTSTATUS WINAPI User32LoadSysMenu( const struct load_sys_menu_params *params, ULONG size )
+{
+    HMENU ret = LoadMenuW( user32_module, params->mdi ? L"SYSMENUMDI" : L"SYSMENU" );
     return HandleToUlong( ret );
 }
 
@@ -208,8 +222,12 @@ static const void *kernel_callback_table[NtUserCallCount] =
     User32CallWindowProc,
     User32CallWindowsHook,
     User32CopyImage,
+    User32DrawScrollBar,
+    User32DrawText,
     User32FreeCachedClipboardData,
     User32LoadDriver,
+    User32LoadImage,
+    User32LoadSysMenu,
     User32RegisterBuiltinClasses,
     User32RenderSsynthesizedFormat,
 };
@@ -259,7 +277,6 @@ static void thread_detach(void)
 
     NtUserCallNoParam( NtUserThreadDetach );
     HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
-    HeapFree( GetProcessHeap(), 0, thread_info->rawinput );
 
     exiting_thread_id = 0;
 }
@@ -347,7 +364,7 @@ BOOL WINAPI LockWorkStation(void)
  */
 int WINAPI RegisterServicesProcess(DWORD ServicesProcessId)
 {
-    FIXME("(0x%x): stub\n", ServicesProcessId);
+    FIXME("(0x%lx): stub\n", ServicesProcessId);
     return 0;
 }
 

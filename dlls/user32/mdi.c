@@ -717,7 +717,7 @@ static LONG MDICascade( HWND client, MDICLIENTINFO *ci )
             LONG posOptions = SWP_DRAWFRAME | SWP_NOACTIVATE | SWP_NOZORDER;
 
             MDI_CalcDefaultChildPos(client, n++, pos, delta, NULL);
-            TRACE("move %p to (%d,%d) size [%d,%d]\n",
+            TRACE("move %p to (%ld,%ld) size [%ld,%ld]\n",
                   win_array[i], pos[0].x, pos[0].y, pos[1].x, pos[1].y);
             style = GetWindowLongW(win_array[i], GWL_STYLE);
 
@@ -859,7 +859,7 @@ static BOOL MDI_AugmentFrameMenu( HWND frame, HWND hChild )
         hIcon = (HICON)GetClassLongPtrW(hChild, GCLP_HICON);
     if (!hIcon)
         hIcon = LoadImageW(0, (LPWSTR)IDI_WINLOGO, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
-                           GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+                           GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR | LR_SHARED);
     if (hIcon)
     {
       HDC hMemDC;
@@ -1032,7 +1032,7 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
 {
     MDICLIENTINFO *ci;
 
-    TRACE("%p %04x (%s) %08lx %08lx\n", hwnd, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
+    TRACE("%p %04x (%s) %08Ix %08Ix\n", hwnd, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
 
     if (!(ci = get_client_info( hwnd )))
     {
@@ -1158,7 +1158,7 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
 
       case WM_MDITILE:
 	ci->mdiFlags |= MDIF_NEEDUPDATE;
-        ShowScrollBar( hwnd, SB_BOTH, FALSE );
+        NtUserShowScrollBar( hwnd, SB_BOTH, FALSE );
         MDITile( hwnd, ci, wParam );
         ci->mdiFlags &= ~MDIF_NEEDUPDATE;
         return 0;
@@ -1209,7 +1209,7 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
             pt.y = (short)HIWORD(lParam);
             child = ChildWindowFromPoint(hwnd, pt);
 
-            TRACE("notification from %p (%i,%i)\n",child,pt.x,pt.y);
+            TRACE("notification from %p (%li,%li)\n",child,pt.x,pt.y);
 
             if (child && child != hwnd && child != ci->hwndActiveChild)
                 NtUserSetWindowPos( child, 0,0,0,0,0, SWP_NOSIZE | SWP_NOMOVE );
@@ -1290,7 +1290,7 @@ LRESULT WINAPI DefFrameProcW( HWND hwnd, HWND hwndMDIClient,
 {
     MDICLIENTINFO *ci = get_client_info( hwndMDIClient );
 
-    TRACE("%p %p %04x (%s) %08lx %08lx\n", hwnd, hwndMDIClient, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
+    TRACE("%p %p %04x (%s) %08Ix %08Ix\n", hwnd, hwndMDIClient, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
 
     if (ci)
     {
@@ -1388,7 +1388,7 @@ LRESULT WINAPI DefMDIChildProcA( HWND hwnd, UINT message,
     HWND client = GetParent(hwnd);
     MDICLIENTINFO *ci = get_client_info( client );
 
-    TRACE("%p %04x (%s) %08lx %08lx\n", hwnd, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
+    TRACE("%p %04x (%s) %08Ix %08Ix\n", hwnd, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
 
     hwnd = WIN_GetFullHandle( hwnd );
     if (!ci) return DefWindowProcA( hwnd, message, wParam, lParam );
@@ -1428,7 +1428,7 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
     HWND client = GetParent(hwnd);
     MDICLIENTINFO *ci = get_client_info( client );
 
-    TRACE("%p %04x (%s) %08lx %08lx\n", hwnd, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
+    TRACE("%p %04x (%s) %08Ix %08Ix\n", hwnd, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
 
     hwnd = WIN_GetFullHandle( hwnd );
     if (!ci) return DefWindowProcW( hwnd, message, wParam, lParam );
@@ -1598,7 +1598,7 @@ HWND WINAPI CreateMDIWindowA(
     HINSTANCE hInstance, /* [in] Handle to application instance */
     LPARAM lParam)         /* [in] Application-defined value */
 {
-    TRACE("(%s,%s,%08x,%d,%d,%d,%d,%p,%p,%08lx)\n",
+    TRACE("(%s,%s,%08lx,%d,%d,%d,%d,%p,%p,%08Ix)\n",
           debugstr_a(lpClassName),debugstr_a(lpWindowName),dwStyle,X,Y,
           nWidth,nHeight,hWndParent,hInstance,lParam);
 
@@ -1626,7 +1626,7 @@ HWND WINAPI CreateMDIWindowW(
     HINSTANCE hInstance, /* [in] Handle to application instance */
     LPARAM lParam)         /* [in] Application-defined value */
 {
-    TRACE("(%s,%s,%08x,%d,%d,%d,%d,%p,%p,%08lx)\n",
+    TRACE("(%s,%s,%08lx,%d,%d,%d,%d,%p,%p,%08Ix)\n",
           debugstr_w(lpClassName), debugstr_w(lpWindowName), dwStyle, X, Y,
           nWidth, nHeight, hWndParent, hInstance, lParam);
 
@@ -1668,7 +1668,7 @@ BOOL WINAPI TranslateMDISysAccel( HWND hwndClient, LPMSG msg )
             default:
                 return FALSE;
             }
-            TRACE("wParam = %04lx\n", wParam);
+            TRACE("wParam = %04Ix\n", wParam);
             SendMessageW(ci->hwndActiveChild, WM_SYSCOMMAND, wParam, msg->wParam);
             return TRUE;
         }
@@ -1701,7 +1701,7 @@ void WINAPI CalcChildScroll( HWND hwnd, INT scroll )
             if (style & WS_MAXIMIZE)
             {
                 HeapFree( GetProcessHeap(), 0, list );
-                ShowScrollBar( hwnd, SB_BOTH, FALSE );
+                NtUserShowScrollBar( hwnd, SB_BOTH, FALSE );
                 return;
             }
             if (style & WS_VISIBLE)
@@ -1730,7 +1730,7 @@ void WINAPI CalcChildScroll( HWND hwnd, INT scroll )
                             info.nMin = childRect.left;
                             info.nMax = childRect.right - clientRect.right;
                             info.nPos = clientRect.left - childRect.left;
-                            SetScrollInfo(hwnd, SB_HORZ, &info, TRUE);
+                            NtUserSetScrollInfo(hwnd, SB_HORZ, &info, TRUE);
                         }
 			if (scroll == SB_HORZ) break;
 			/* fall through */
@@ -1740,7 +1740,7 @@ void WINAPI CalcChildScroll( HWND hwnd, INT scroll )
                             info.nMin = childRect.top;
                             info.nMax = childRect.bottom - clientRect.bottom;
                             info.nPos = clientRect.top - childRect.top;
-                            SetScrollInfo(hwnd, SB_VERT, &info, TRUE);
+                            NtUserSetScrollInfo(hwnd, SB_VERT, &info, TRUE);
                         }
 			break;
     }
@@ -1822,11 +1822,11 @@ void WINAPI ScrollChildren(HWND hWnd, UINT uMsg, WPARAM wParam,
     SetScrollPos(hWnd, (uMsg == WM_VSCROLL)?SB_VERT:SB_HORZ , newPos, TRUE);
 
     if( uMsg == WM_VSCROLL )
-	ScrollWindowEx(hWnd ,0 ,curPos - newPos, NULL, NULL, 0, NULL,
-			SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
+	NtUserScrollWindowEx( hWnd ,0 ,curPos - newPos, NULL, NULL, 0, NULL,
+                              SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
     else
-	ScrollWindowEx(hWnd ,curPos - newPos, 0, NULL, NULL, 0, NULL,
-			SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
+	NtUserScrollWindowEx( hWnd ,curPos - newPos, 0, NULL, NULL, 0, NULL,
+                              SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
 done:
     SetThreadDpiAwarenessContext( context );
 }

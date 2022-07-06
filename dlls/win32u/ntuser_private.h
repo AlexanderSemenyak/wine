@@ -32,22 +32,18 @@ struct hardware_msg_data;
 
 struct user_callbacks
 {
-    BOOL (WINAPI *pEndMenu)(void);
     BOOL (WINAPI *pImmProcessKey)(HWND, HKL, UINT, LPARAM, DWORD);
     BOOL (WINAPI *pImmTranslateMessage)(HWND, UINT, WPARAM, LPARAM);
-    void (CDECL *free_win_ptr)( struct tagWND *win );
-    HMENU (CDECL *get_sys_menu)( HWND hwnd, HMENU popup );
-    HWND (CDECL *is_menu_active)(void);
+    NTSTATUS (WINAPI *pNtWaitForMultipleObjects)(ULONG,const HANDLE*,BOOLEAN,BOOLEAN,const LARGE_INTEGER*);
     void (CDECL *notify_ime)( HWND hwnd, UINT param );
     BOOL (CDECL *post_dde_message)( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD dest_tid,
                                     DWORD type );
-    BOOL (CDECL *process_rawinput_message)( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data );
-    BOOL (CDECL *rawinput_device_get_usages)(HANDLE handle, USHORT *usage_page, USHORT *usage);
-    void (WINAPI *set_standard_scroll_painted)( HWND hwnd, INT bar, BOOL visible );
     BOOL (CDECL *unpack_dde_message)( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
                                       void **buffer, size_t size );
     BOOL (WINAPI *register_imm)( HWND hwnd );
     void (WINAPI *unregister_imm)( HWND hwnd );
+    NTSTATUS (CDECL *try_finally)( NTSTATUS (CDECL *func)( void *), void *arg,
+                                   void (CALLBACK *finally_func)( BOOL ));
 };
 
 #define WM_SYSTIMER         0x0118
@@ -58,6 +54,16 @@ enum system_timer_id
     SYSTEM_TIMER_TRACK_MOUSE = 0xfffa,
     SYSTEM_TIMER_CARET = 0xffff,
 };
+
+struct rawinput_thread_data
+{
+    UINT     hw_id;     /* current rawinput message id */
+    RAWINPUT buffer[1]; /* rawinput message data buffer */
+};
+
+/* on windows the buffer capacity is quite large as well, enough to */
+/* hold up to 10s of 1kHz mouse rawinput events */
+#define RAWINPUT_BUFFER_SIZE (512 * 1024)
 
 struct user_object
 {
@@ -89,7 +95,7 @@ typedef struct tagWND
     POINT              min_pos;       /* Position for minimized window */
     POINT              max_pos;       /* Position for maximized window */
     WCHAR             *text;          /* Window text */
-    void              *pScroll;       /* Scroll-bar info */
+    struct win_scroll_bar_info *pScroll; /* Scroll-bar info */
     DWORD              dwStyle;       /* Window style (from CreateWindow) */
     DWORD              dwExStyle;     /* Extended style (from CreateWindowEx) */
     UINT_PTR           wIDmenu;       /* ID or hmenu (from CreateWindow) */
@@ -194,54 +200,24 @@ enum builtin_winprocs
     NB_BUILTIN_AW_WINPROCS = WINPROC_DESKTOP
 };
 
-/* FIXME: make it private to menu.c */
+/* FIXME: make it private to scroll.c */
 
-/* Menu item structure */
-typedef struct menu_item
+/* data for a single scroll bar */
+struct scroll_info
 {
-    /* ----------- MENUITEMINFO Stuff ----------- */
-    UINT      fType;          /* Item type. */
-    UINT      fState;         /* Item state.  */
-    UINT_PTR  wID;            /* Item id.  */
-    HMENU     hSubMenu;       /* Pop-up menu.  */
-    HBITMAP   hCheckBit;      /* Bitmap when checked.  */
-    HBITMAP   hUnCheckBit;    /* Bitmap when unchecked.  */
-    LPWSTR    text;           /* Item text. */
-    ULONG_PTR dwItemData;     /* Application defined.  */
-    LPWSTR    dwTypeData;     /* depends on fMask */
-    HBITMAP   hbmpItem;       /* bitmap */
-    /* ----------- Wine stuff ----------- */
-    RECT      rect;           /* Item area (relative to the items_rect),
-                               * see MENU_AdjustMenuItemRect(). */
-    UINT      xTab;           /* X position of text after Tab */
-    SIZE      bmpsize;        /* size needed for the HBMMENU_CALLBACK bitmap */
-} MENUITEM;
+    INT   curVal;   /* Current scroll-bar value */
+    INT   minVal;   /* Minimum scroll-bar value */
+    INT   maxVal;   /* Maximum scroll-bar value */
+    INT   page;     /* Page size of scroll bar (Win32) */
+    UINT  flags;    /* EnableScrollBar flags */
+    BOOL  painted;  /* Whether the scroll bar is painted by DefWinProc() */
+};
 
-typedef struct
+struct scroll_bar_win_data
 {
-    struct user_object obj;
-    WORD        wFlags;       /* Menu flags (MF_POPUP, MF_SYSMENU) */
-    WORD	Width;        /* Width of the whole menu */
-    WORD	Height;       /* Height of the whole menu */
-    UINT        nItems;       /* Number of items in the menu */
-    HWND        hWnd;         /* Window containing the menu */
-    struct menu_item *items;  /* Array of menu items */
-    UINT        FocusedItem;  /* Currently focused item */
-    HWND	hwndOwner;    /* window receiving the messages for ownerdraw */
-    BOOL        bScrolling;   /* Scroll arrows are active */
-    UINT        nScrollPos;   /* Current scroll position */
-    UINT        nTotalHeight; /* Total height of menu items inside menu */
-    RECT        items_rect;   /* Rectangle within which the items lie.  Excludes margins and scroll arrows */
-    LONG        refcount;
-    /* ------------ MENUINFO members ------ */
-    DWORD	dwStyle;	/* Extended menu style */
-    UINT	cyMax;		/* max height of the whole menu, 0 is screen height */
-    HBRUSH	hbrBack;	/* brush for menu background */
-    DWORD	dwContextHelpID;
-    ULONG_PTR	dwMenuData;	/* application defined value */
-    HMENU       hSysMenuOwner;  /* Handle to the dummy sys menu holder */
-    WORD        textOffset;     /* Offset of text when items have both bitmaps and text */
-} POPUPMENU, *LPPOPUPMENU;
+    DWORD magic;
+    struct scroll_info info;
+};
 
 /* FIXME: make it private to class.c */
 typedef struct tagWINDOWPROC

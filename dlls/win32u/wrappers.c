@@ -855,6 +855,19 @@ LRESULT WINAPI NtUserDispatchMessage( const MSG *msg )
     return unix_funcs->pNtUserDispatchMessage( msg );
 }
 
+BOOL WINAPI NtUserDragDetect( HWND hwnd, int x, int y )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserDragDetect( hwnd, x, y );
+}
+
+BOOL WINAPI NtUserDrawCaptionTemp( HWND hwnd, HDC hdc, const RECT *rect, HFONT font,
+                                   HICON icon, const WCHAR *str, UINT flags )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserDrawCaptionTemp( hwnd, hdc, rect, font, icon, str, flags );
+}
+
 BOOL WINAPI NtUserDrawIconEx( HDC hdc, INT x0, INT y0, HICON icon, INT width,
                               INT height, UINT istep, HBRUSH hbr, UINT flags )
 {
@@ -862,10 +875,22 @@ BOOL WINAPI NtUserDrawIconEx( HDC hdc, INT x0, INT y0, HICON icon, INT width,
     return unix_funcs->pNtUserDrawIconEx( hdc, x0, y0, icon, width, height, istep, hbr, flags );
 }
 
+DWORD WINAPI NtUserDrawMenuBarTemp( HWND hwnd, HDC hdc, RECT *rect, HMENU handle, HFONT font )
+{
+    if (!unix_funcs) return 0;
+    return unix_funcs->pNtUserDrawMenuBarTemp( hwnd, hdc, rect, handle, font );
+}
+
 BOOL WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags )
 {
     if (!unix_funcs) return FALSE;
     return unix_funcs->pNtUserEnableMenuItem( handle, id, flags );
+}
+
+BOOL WINAPI NtUserEnableScrollBar( HWND hwnd, UINT bar, UINT flags )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserEnableScrollBar( hwnd, bar, flags );
 }
 
 BOOL WINAPI NtUserEndDeferWindowPosEx( HDWP hdwp, BOOL async )
@@ -969,6 +994,12 @@ INT WINAPI NtUserGetKeyNameText( LONG lparam, WCHAR *buffer, INT size )
     return unix_funcs->pNtUserGetKeyNameText( lparam, buffer, size );
 }
 
+BOOL WINAPI NtUserGetMenuBarInfo( HWND hwnd, LONG id, LONG item, MENUBARINFO *info )
+{
+    if (!unix_funcs) return 0;
+    return unix_funcs->pNtUserGetMenuBarInfo( hwnd, id, item, info );
+}
+
 BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
     if (!unix_funcs) return FALSE;
@@ -999,6 +1030,12 @@ BOOL WINAPI NtUserHideCaret( HWND hwnd )
     return unix_funcs->pNtUserHideCaret( hwnd );
 }
 
+BOOL WINAPI NtUserHiliteMenuItem( HWND hwnd, HMENU handle, UINT item, UINT hilite )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserHiliteMenuItem( hwnd, handle, item, hilite );
+}
+
 BOOL WINAPI NtUserMoveWindow( HWND hwnd, INT x, INT y, INT cx, INT cy, BOOL repaint )
 {
     if (!unix_funcs) return 0;
@@ -1017,16 +1054,41 @@ DWORD WINAPI NtUserGetQueueStatus( UINT flags )
     return unix_funcs->pNtUserGetQueueStatus( flags );
 }
 
+BOOL WINAPI NtUserGetScrollBarInfo( HWND hwnd, LONG id, SCROLLBARINFO *info )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserGetScrollBarInfo( hwnd, id, info );
+}
+
 BOOL WINAPI NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *out_size )
 {
     if (!unix_funcs) return FALSE;
     return unix_funcs->pNtUserGetUpdatedClipboardFormats( formats, size, out_size );
 }
 
+
 BOOL WINAPI NtUserGetWindowPlacement( HWND hwnd, WINDOWPLACEMENT *placement )
 {
     if (!unix_funcs) return FALSE;
     return unix_funcs->pNtUserGetWindowPlacement( hwnd, placement );
+}
+
+HICON WINAPI NtUserInternalGetWindowIcon( HWND hwnd, UINT type )
+{
+    if (!unix_funcs) return 0;
+    return unix_funcs->pNtUserInternalGetWindowIcon( hwnd, type );
+}
+
+BOOL WINAPI NtUserInvalidateRect( HWND hwnd, const RECT *rect, BOOL erase )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserInvalidateRect( hwnd, rect, erase );
+}
+
+BOOL WINAPI NtUserInvalidateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserInvalidateRgn( hwnd, hrgn, erase );
 }
 
 BOOL WINAPI NtUserIsClipboardFormatAvailable( UINT format )
@@ -1110,6 +1172,15 @@ BOOL WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const R
 {
     if (!unix_funcs) return FALSE;
     return unix_funcs->pNtUserScrollDC( hdc, dx, dy, scroll, clip, ret_update_rgn, update_rect );
+}
+
+INT WINAPI NtUserScrollWindowEx( HWND hwnd, INT dx, INT dy, const RECT *rect,
+                                 const RECT *clip_rect, HRGN update_rgn,
+                                 RECT *update_rect, UINT flags )
+{
+    if (!unix_funcs) return 0;
+    return unix_funcs->pNtUserScrollWindowEx( hwnd, dx, dy, rect, clip_rect,
+                                              update_rgn, update_rect, flags );
 }
 
 HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
@@ -1215,6 +1286,12 @@ HWND WINAPI NtUserSetParent( HWND hwnd, HWND parent )
     return unix_funcs->pNtUserSetParent( hwnd, parent );
 }
 
+INT WINAPI NtUserSetScrollInfo( HWND hwnd, INT bar, const SCROLLINFO *info, BOOL redraw )
+{
+    if (!unix_funcs) return 0;
+    return unix_funcs->pNtUserSetScrollInfo( hwnd, bar, info, redraw );
+}
+
 BOOL WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *values )
 {
     if (!unix_funcs) return FALSE;
@@ -1275,6 +1352,12 @@ INT WINAPI NtUserShowCursor( BOOL show )
     return unix_funcs->pNtUserShowCursor( show );
 }
 
+BOOL WINAPI NtUserShowScrollBar( HWND hwnd, INT bar, BOOL show )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserShowScrollBar( hwnd, bar, show );
+}
+
 BOOL WINAPI NtUserShowWindowAsync( HWND hwnd, INT cmd )
 {
     if (!unix_funcs) return FALSE;
@@ -1310,6 +1393,13 @@ BOOL WINAPI NtUserTrackMouseEvent( TRACKMOUSEEVENT *info )
 {
     if (!unix_funcs) return FALSE;
     return unix_funcs->pNtUserTrackMouseEvent( info );
+}
+
+BOOL WINAPI NtUserTrackPopupMenuEx( HMENU handle, UINT flags, INT x, INT y, HWND hwnd,
+                                    TPMPARAMS *params )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserTrackPopupMenuEx( handle, flags, x, y, hwnd, params );
 }
 
 INT WINAPI NtUserTranslateAccelerator( HWND hwnd, HACCEL accel, MSG *msg )
@@ -1406,15 +1496,6 @@ BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input, const RAWINPUT *raw
 {
     if (!unix_funcs) return FALSE;
     return unix_funcs->wine_send_input( hwnd, input, rawinput );
-}
-
-/***********************************************************************
- *           __wine_set_user_driver    (win32u.@)
- */
-void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version )
-{
-    if (!unix_funcs) return;
-    return unix_funcs->set_user_driver( funcs, version );
 }
 
 extern void wrappers_init( unixlib_handle_t handle )

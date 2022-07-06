@@ -424,7 +424,7 @@ static HRESULT reader_add_attr(xmlreader *reader, strval *prefix, strval *localn
     {
         hr = reader_strvaldup(reader, value, &attr->value);
         if (hr != S_OK)
-            reader_free_strvalued(reader, &attr->value);
+            reader_free_strvalued(reader, &attr->localname);
     }
     if (hr != S_OK)
     {
@@ -1030,7 +1030,7 @@ static void readerinput_switchencoding(xmlreaderinput *readerinput, xml_encoding
     {
         readerinput_grow(readerinput, len);
         memcpy(dest->data, src->data + src->cur, len);
-        dest->written += len*sizeof(WCHAR);
+        dest->written += len;
     }
     else
     {
@@ -1084,7 +1084,7 @@ static HRESULT reader_more(xmlreader *reader)
     {
         readerinput_grow(readerinput, len);
         memcpy(dest->data + dest->written, src->data + src->cur, len);
-        dest->written += len*sizeof(WCHAR);
+        dest->written += len;
     }
     else
     {
@@ -2931,6 +2931,8 @@ static HRESULT WINAPI xmlreader_GetNodeType(IXmlReader* iface, XmlNodeType *node
 
 static void reader_set_current_attribute(xmlreader *reader, struct attribute *attr)
 {
+    if (!reader->attr)
+        reader_inc_depth(reader);
     reader->attr = attr;
     reader->chunk_read_off = 0;
     reader_set_strvalue(reader, StringValue_Prefix, &attr->prefix);
@@ -2942,9 +2944,6 @@ static HRESULT reader_move_to_first_attribute(xmlreader *reader)
 {
     if (!reader->attr_count)
         return S_FALSE;
-
-    if (!reader->attr)
-        reader_inc_depth(reader);
 
     reader_set_current_attribute(reader, LIST_ENTRY(list_head(&reader->attrs), struct attribute, entry));
 

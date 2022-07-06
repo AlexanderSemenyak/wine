@@ -2499,6 +2499,63 @@ static void test_create_texture1d(void)
     ok(!refcount, "Device has %lu references left.\n", refcount);
 }
 
+#define test_dxgi_resource(a) test_dxgi_resource_(__LINE__, a)
+static void test_dxgi_resource_(unsigned int line, void *iface)
+{
+    IDXGIResource *resource, *resource2;
+    IDXGISurface *surface, *surface2;
+    IUnknown *object = iface, *unk;
+    DWORD data;
+    HRESULT hr;
+    UINT size;
+
+    hr = IUnknown_QueryInterface(object, &IID_IDXGIResource, (void **)&resource);
+    ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (FAILED(hr)) return;
+
+    if (SUCCEEDED(IUnknown_QueryInterface(object, &IID_IDXGISurface, (void **)&surface)))
+    {
+        hr = IDXGISurface_QueryInterface(surface, &IID_IDXGIDeviceSubObject, (void **)&unk);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)((IUnknown *)resource == unk, "Unexpected interface pointer.\n");
+        IUnknown_Release(unk);
+
+        hr = IDXGISurface_QueryInterface(surface, &IID_IDXGIObject, (void **)&unk);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)((IUnknown *)resource == unk, "Unexpected interface pointer.\n");
+        IUnknown_Release(unk);
+
+        hr = IDXGISurface_QueryInterface(surface, &IID_IDXGIResource, (void **)&resource2);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)(resource2 == resource, "Unexpected resource pointer.\n");
+        IDXGIResource_Release(resource2);
+
+        hr = IDXGIResource_QueryInterface(resource, &IID_IDXGISurface, (void **)&surface2);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)(surface2 == surface, "Unexpected surface pointer.\n");
+        IDXGISurface_Release(surface2);
+
+        hr = IDXGISurface_GetParent(surface, &IID_IDXGIResource, (void **)&resource2);
+        ok_(__FILE__, line)(hr == E_NOINTERFACE, "Got unexpected hr %#lx.\n", hr);
+        hr = IDXGIResource_GetParent(resource, &IID_IDXGISurface, (void **)&surface2);
+        ok_(__FILE__, line)(hr == E_NOINTERFACE, "Got unexpected hr %#lx.\n", hr);
+
+        data = 123;
+        hr = IDXGIResource_SetPrivateData(resource, &IID_IUnknown, sizeof(data), &data);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        size = sizeof(data);
+        data = 0;
+        hr = IDXGISurface_GetPrivateData(surface, &IID_IUnknown, &size, &data);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)(data == 123, "Unexpected data %#lx.\n", data);
+
+        IDXGISurface_Release(surface);
+    }
+
+    IDXGIResource_Release(resource);
+}
+
 static void test_texture1d_interfaces(void)
 {
     ID3D10Texture1D *d3d10_texture;
@@ -2548,7 +2605,7 @@ static void test_texture1d_interfaces(void)
     }
 
     desc.Width = 512;
-    desc.MipLevels = 0;
+    desc.MipLevels = 1;
     desc.ArraySize = 1;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.Usage = D3D11_USAGE_DEFAULT;
@@ -2558,7 +2615,15 @@ static void test_texture1d_interfaces(void)
 
     hr = ID3D11Device_CreateTexture1D(device, &desc, NULL, &texture);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    test_dxgi_resource(texture);
+    ID3D11Texture1D_Release(texture);
+
+    desc.MipLevels = 0;
+    hr = ID3D11Device_CreateTexture1D(device, &desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    test_dxgi_resource(texture);
     check_interface(texture, &IID_IDXGISurface, FALSE, FALSE);
+    check_interface(texture, &IID_IDXGIResource, TRUE, FALSE);
     hr = check_interface(texture, &IID_ID3D10Texture1D, TRUE, TRUE); /* Not available on all Windows versions. */
     ID3D11Texture1D_Release(texture);
     if (FAILED(hr))
@@ -2934,7 +2999,7 @@ static void test_texture2d_interfaces(void)
 
     desc.Width = 512;
     desc.Height = 512;
-    desc.MipLevels = 0;
+    desc.MipLevels = 1;
     desc.ArraySize = 1;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc.Count = 1;
@@ -2946,7 +3011,17 @@ static void test_texture2d_interfaces(void)
 
     hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &texture);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    check_interface(texture, &IID_IDXGISurface, TRUE, FALSE);
+    check_interface(texture, &IID_IDXGIResource, TRUE, FALSE);
+    test_dxgi_resource(texture);
+    ID3D11Texture2D_Release(texture);
+
+    desc.MipLevels = 0;
+    hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     check_interface(texture, &IID_IDXGISurface, FALSE, FALSE);
+    check_interface(texture, &IID_IDXGIResource, TRUE, FALSE);
+    test_dxgi_resource(texture);
     hr = check_interface(texture, &IID_ID3D10Texture2D, TRUE, TRUE); /* Not available on all Windows versions. */
     ID3D11Texture2D_Release(texture);
     if (FAILED(hr))
@@ -3211,6 +3286,8 @@ static void test_texture3d_interfaces(void)
     hr = ID3D11Device_CreateTexture3D(device, &desc, NULL, &texture);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     check_interface(texture, &IID_IDXGISurface, FALSE, FALSE);
+    check_interface(texture, &IID_IDXGIResource, TRUE, FALSE);
+    test_dxgi_resource(texture);
     hr = check_interface(texture, &IID_ID3D10Texture3D, TRUE, TRUE); /* Not available on all Windows versions. */
     ID3D11Texture3D_Release(texture);
     if (FAILED(hr))
@@ -3525,6 +3602,8 @@ static void test_create_buffer(void)
                 win_skip("Failed to create a buffer, skipping test %u.\n", i);
             continue;
         }
+
+        check_interface(buffer, &IID_IDXGIResource, TRUE, FALSE);
 
         if (!(desc.MiscFlags & D3D11_RESOURCE_MISC_BUFFER_STRUCTURED))
             desc.StructureByteStride = 0;
@@ -14934,8 +15013,14 @@ static void test_resource_map(void)
     hr = ID3D11Device_CreateBuffer(device, &buffer_desc, NULL, &buffer);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+    mapped_subresource.pData = (void *)0xdeadbeef;
+    mapped_subresource.RowPitch = 0xabab;
+    mapped_subresource.DepthPitch = 0xcdcd;
     hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)buffer, 1, D3D11_MAP_READ, 0, &mapped_subresource);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!mapped_subresource.pData, "Unexpected pointer %p.\n", mapped_subresource.pData);
+    ok(mapped_subresource.RowPitch == 0xabab, "Unexpected row pitch value %u.\n", mapped_subresource.RowPitch);
+    ok(mapped_subresource.DepthPitch == 0xcdcd, "Unexpected depth pitch value %u.\n", mapped_subresource.DepthPitch);
 
     memset(&mapped_subresource, 0, sizeof(mapped_subresource));
     hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)buffer, 0, D3D11_MAP_WRITE, 0, &mapped_subresource);
@@ -14972,8 +15057,14 @@ static void test_resource_map(void)
     hr = ID3D11Device_CreateTexture2D(device, &texture2d_desc, NULL, &texture2d);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+    mapped_subresource.pData = (void *)0xdeadbeef;
+    mapped_subresource.RowPitch = 0xabab;
+    mapped_subresource.DepthPitch = 0xcdcd;
     hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)texture2d, 1, D3D11_MAP_READ, 0, &mapped_subresource);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!mapped_subresource.pData, "Unexpected pointer %p.\n", mapped_subresource.pData);
+    ok(mapped_subresource.RowPitch == 0xabab, "Unexpected row pitch value %u.\n", mapped_subresource.RowPitch);
+    ok(mapped_subresource.DepthPitch == 0xcdcd, "Unexpected depth pitch value %u.\n", mapped_subresource.DepthPitch);
 
     memset(&mapped_subresource, 0, sizeof(mapped_subresource));
     hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)texture2d, 0, D3D11_MAP_WRITE, 0, &mapped_subresource);
@@ -20667,9 +20758,9 @@ static void test_line_antialiasing_blending(void)
     release_test_context(&test_context);
 }
 
-static void check_format_support(const unsigned int *format_support, D3D_FEATURE_LEVEL feature_level,
-        const struct format_support *formats, unsigned int format_count, unsigned int feature_flag,
-        const char *feature_name)
+static void check_format_support(ID3D11Device *device, const unsigned int *format_support,
+        D3D_FEATURE_LEVEL feature_level, const struct format_support *formats,
+        unsigned int format_count, unsigned int feature_flag, const char *feature_name)
 {
     unsigned int i;
 
@@ -20681,7 +20772,8 @@ static void check_format_support(const unsigned int *format_support, D3D_FEATURE
         if (formats[i].fl_required <= feature_level)
         {
             todo_wine_if (feature_flag == D3D11_FORMAT_SUPPORT_DISPLAY)
-                ok(supported, "Format %#x - %s not supported, feature_level %#x, format support %#x.\n",
+                ok(supported || broken(is_warp_device(device)),
+                        "Format %#x - %s not supported, feature_level %#x, format support %#x.\n",
                         format, feature_name, feature_level, format_support[format]);
             continue;
         }
@@ -20721,6 +20813,39 @@ static void test_format_support(const D3D_FEATURE_LEVEL feature_level)
         {DXGI_FORMAT_R8G8_UINT, D3D_FEATURE_LEVEL_10_0},
         {DXGI_FORMAT_R11G11B10_FLOAT, D3D_FEATURE_LEVEL_10_0},
         {DXGI_FORMAT_R16_FLOAT, D3D_FEATURE_LEVEL_10_0},
+    };
+
+    static const struct format_support blend[] =
+    {
+        {DXGI_FORMAT_R16G16B16A16_UNORM,    D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R16G16_UNORM,          D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R16_UNORM,             D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R16G16B16A16_SNORM,    D3D_FEATURE_LEVEL_10_1},
+        {DXGI_FORMAT_R16G16_SNORM,          D3D_FEATURE_LEVEL_10_1},
+        {DXGI_FORMAT_R16_SNORM,             D3D_FEATURE_LEVEL_10_1},
+        {DXGI_FORMAT_R8G8B8A8_SNORM,        D3D_FEATURE_LEVEL_10_1},
+        {DXGI_FORMAT_R8G8_SNORM,            D3D_FEATURE_LEVEL_10_1},
+        {DXGI_FORMAT_R8_SNORM,              D3D_FEATURE_LEVEL_10_1},
+
+        {DXGI_FORMAT_R32G32B32A32_FLOAT,    D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R32G32_FLOAT,          D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R32_FLOAT,             D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R10G10B10A2_UNORM,     D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R11G11B10_FLOAT,       D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R16_FLOAT,             D3D_FEATURE_LEVEL_10_0},
+
+        {DXGI_FORMAT_R16G16B16A16_FLOAT,    D3D_FEATURE_LEVEL_9_3},
+
+        {DXGI_FORMAT_R8G8B8A8_UNORM,        D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,   D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_R8G8_UNORM,            D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_R8_UNORM,              D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_A8_UNORM,              D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_B5G6R5_UNORM,          D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_B8G8R8A8_UNORM,        D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_B8G8R8X8_UNORM,        D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,   D3D_FEATURE_LEVEL_9_1},
+        {DXGI_FORMAT_B8G8R8X8_UNORM_SRGB,   D3D_FEATURE_LEVEL_9_1},
     };
 
     device_desc.feature_level = &feature_level;
@@ -20784,17 +20909,20 @@ static void test_format_support(const D3D_FEATURE_LEVEL feature_level)
                 "SHADER_LOAD is not supported for R32G32B32A32_UINT.\n");
     }
 
-    check_format_support(format_support, feature_level,
+    check_format_support(device, format_support, feature_level,
             index_buffers, ARRAY_SIZE(index_buffers),
             D3D11_FORMAT_SUPPORT_IA_INDEX_BUFFER, "index buffer");
 
-    check_format_support(format_support, feature_level,
+    check_format_support(device, format_support, feature_level,
             vertex_buffers, ARRAY_SIZE(vertex_buffers),
             D3D11_FORMAT_SUPPORT_IA_VERTEX_BUFFER, "vertex buffer");
 
-    check_format_support(format_support, feature_level,
+    check_format_support(device, format_support, feature_level,
             display_format_support, ARRAY_SIZE(display_format_support),
             D3D11_FORMAT_SUPPORT_DISPLAY, "display");
+
+    check_format_support(device, format_support, feature_level, blend, ARRAY_SIZE(blend),
+            D3D11_FORMAT_SUPPORT_BLENDABLE, "blendable");
 
     refcount = ID3D11Device_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
@@ -33285,8 +33413,14 @@ static void test_deferred_context_map(void)
     hr = ID3D11Device_CreateBuffer(device, &buffer_desc, &resource_data, &buffer2);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+    map_desc.pData = (void *)0xdeadbeef;
+    map_desc.RowPitch = 0xabab;
+    map_desc.DepthPitch = 0xcdcd;
     hr = ID3D11DeviceContext_Map(deferred, (ID3D11Resource *)buffer, 0, D3D11_MAP_READ, 0, &map_desc);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!map_desc.pData, "Unexpected pointer %p.\n", map_desc.pData);
+    ok(map_desc.RowPitch == 0xabab, "Unexpected row pitch value %u.\n", map_desc.RowPitch);
+    ok(map_desc.DepthPitch == 0xcdcd, "Unexpected depth pitch value %u.\n", map_desc.DepthPitch);
 
     hr = ID3D11DeviceContext_Map(deferred, (ID3D11Resource *)buffer, 0, D3D11_MAP_READ_WRITE, 0, &map_desc);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);

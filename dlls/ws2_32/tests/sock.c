@@ -202,6 +202,11 @@ static void tcp_socketpair(SOCKET *src, SOCKET *dst)
     tcp_socketpair_flags(src, dst, WSA_FLAG_OVERLAPPED);
 }
 
+static void WINAPI apc_func(ULONG_PTR apc_count)
+{
+    ++*(unsigned int *)apc_count;
+}
+
 /* Set the linger timeout to zero and close the socket. This will trigger an
  * RST on the connection on Windows as well as on Unix systems. */
 static void close_with_rst(SOCKET s)
@@ -3197,6 +3202,156 @@ static void test_WSADuplicateSocket(void)
     closesocket(source);
 }
 
+static void test_WSAConnectByName(void)
+{
+    SOCKET s;
+    SOCKADDR_IN local_addr = {0}, remote_addr = {0},
+                sock_addr = {0}, peer_addr = {0};
+    DWORD local_len, remote_len, conn_ctx;
+    int ret, err, sock_len, peer_len;
+    WSAOVERLAPPED overlap;
+    struct addrinfo *first_addrinfo, first_hints;
+
+    conn_ctx = TRUE;
+
+    /* First call of getaddrinfo fails on w8adm */
+    first_addrinfo = NULL;
+    memset(&first_hints, 0, sizeof(struct addrinfo));
+    first_hints.ai_socktype = SOCK_STREAM;
+    first_hints.ai_family = AF_INET;
+    first_hints.ai_protocol = IPPROTO_TCP;
+    getaddrinfo("winehq.org", "http", &first_hints, &first_addrinfo);
+    if (first_addrinfo)
+        freeaddrinfo(first_addrinfo);
+    SetLastError(0xdeadbeef);
+
+    /* Fill all fields */
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    local_len = remote_len = sizeof(SOCKADDR_IN);
+    ret = WSAConnectByNameA(s, "winehq.org", "http", &local_len, (struct sockaddr *)&local_addr,
+                             &remote_len, (struct sockaddr *)&remote_addr, NULL, NULL);
+    ok(ret, "WSAConnectByNameA should have succeeded, error %u\n", WSAGetLastError());
+    setsockopt(s, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, (char *)&conn_ctx, sizeof(DWORD));
+    sock_len = peer_len = sizeof(SOCKADDR_IN);
+    ret = getsockname(s, (struct sockaddr *)&sock_addr, &sock_len);
+    ok(!ret, "getsockname should have succeeded, error %u\n", WSAGetLastError());
+    ret = getpeername(s, (struct sockaddr *)&peer_addr, &peer_len);
+    ok(!ret, "getpeername should have succeeded, error %u\n", WSAGetLastError());
+    ok(sock_len == sizeof(SOCKADDR_IN), "got sockname size of %d\n", sock_len);
+    ok(peer_len == sizeof(SOCKADDR_IN), "got peername size of %d\n", peer_len);
+    ok(local_len == sizeof(SOCKADDR_IN), "got local size of %lu\n", local_len);
+    ok(remote_len == sizeof(SOCKADDR_IN), "got remote size of %lu\n", remote_len);
+    ok(!local_addr.sin_port, "local_addr has non-zero sin_port: %hu.\n", local_addr.sin_port);
+    ok(!memcmp(&sock_addr.sin_addr, &local_addr.sin_addr, sizeof(struct in_addr)),
+       "local_addr did not receive data.\n");
+    ok(!memcmp(&peer_addr, &remote_addr, sizeof(SOCKADDR_IN)), "remote_addr did not receive data.\n");
+    closesocket(s);
+
+    /* Passing NULL length but a pointer to a sockaddr */
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    local_len = remote_len = sizeof(SOCKADDR_IN);
+    memset(&local_addr, 0, sizeof(SOCKADDR_IN));
+    memset(&remote_addr, 0, sizeof(SOCKADDR_IN));
+    memset(&sock_addr, 0, sizeof(SOCKADDR_IN));
+    memset(&peer_addr, 0, sizeof(SOCKADDR_IN));
+    ret = WSAConnectByNameA(s, "winehq.org", "http", NULL, (struct sockaddr *)&local_addr,
+                             NULL, (struct sockaddr *)&remote_addr, NULL, NULL);
+    ok(ret, "WSAConnectByNameA should have succeeded, error %u\n", WSAGetLastError());
+    setsockopt(s, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, (char *)&conn_ctx, sizeof(DWORD));
+    sock_len = peer_len = sizeof(SOCKADDR_IN);
+    ret = getsockname(s, (struct sockaddr *)&sock_addr, &sock_len);
+    ok(!ret, "getsockname should have succeeded, error %u\n", WSAGetLastError());
+    ret = getpeername(s, (struct sockaddr *)&peer_addr, &peer_len);
+    ok(!ret, "getpeername should have succeeded, error %u\n", WSAGetLastError());
+    ok(sock_len == sizeof(SOCKADDR_IN), "got sockname size of %d\n", sock_len);
+    ok(peer_len == sizeof(SOCKADDR_IN), "got peername size of %d\n", peer_len);
+    ok(!local_addr.sin_family, "local_addr received data.\n");
+    ok(!remote_addr.sin_family, "remote_addr received data.\n");
+    closesocket(s);
+
+    /* Passing NULLs for node or service */
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = WSAConnectByNameA(s, NULL, "http", NULL, NULL, NULL, NULL, NULL, NULL);
+    err = WSAGetLastError();
+    ok(!ret, "WSAConnectByNameA should have failed\n");
+    ok(err == WSAEINVAL, "expected error %u (WSAEINVAL), got %u\n", WSAEINVAL, err);
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    closesocket(s);
+    ret = WSAConnectByNameA(s, "winehq.org", NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    err = WSAGetLastError();
+    ok(!ret, "WSAConnectByNameA should have failed\n");
+    ok(err == WSAEINVAL, "expected error %u (WSAEINVAL), got %u\n", WSAEINVAL, err);
+    closesocket(s);
+
+    /* Passing NULL for the addresses and address lengths */
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = WSAConnectByNameA(s, "winehq.org", "http", NULL, NULL, NULL, NULL, NULL, NULL);
+    ok(ret, "WSAConnectByNameA should have succeeded, error %u\n", WSAGetLastError());
+    closesocket(s);
+
+    /* Passing NULL for the addresses and passing correct lengths */
+    local_len = remote_len = sizeof(SOCKADDR_IN);
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = WSAConnectByNameA(s, "winehq.org", "http", &local_len, NULL,
+                            &remote_len, NULL, NULL, NULL);
+    ok(ret, "WSAConnectByNameA should have succeeded, error %u\n", WSAGetLastError());
+    ok(local_len == sizeof(SOCKADDR_IN), "local_len should have been %Iu, got %ld\n", sizeof(SOCKADDR_IN),
+       local_len);
+    ok(remote_len == sizeof(SOCKADDR_IN), "remote_len should have been %Iu, got %ld\n", sizeof(SOCKADDR_IN),
+       remote_len);
+    closesocket(s);
+
+    /* Passing addresses and passing short lengths */
+    local_len = remote_len = 3;
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = WSAConnectByNameA(s, "winehq.org", "http", &local_len, (struct sockaddr *)&local_addr,
+                            &remote_len, (struct sockaddr *)&remote_addr, NULL, NULL);
+    err = WSAGetLastError();
+    ok(!ret, "WSAConnectByNameA should have failed\n");
+    ok(err == WSAEFAULT, "expected error %u (WSAEFAULT), got %u\n", WSAEFAULT, err);
+    ok(local_len == 3, "local_len should have been 3, got %ld\n", local_len);
+    ok(remote_len == 3, "remote_len should have been 3, got %ld\n", remote_len);
+    closesocket(s);
+
+    /* Passing addresses and passing long lengths */
+    local_len = remote_len = 50;
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = WSAConnectByNameA(s, "winehq.org", "http", &local_len, (struct sockaddr *)&local_addr,
+                            &remote_len, (struct sockaddr *)&remote_addr, NULL, NULL);
+    ok(ret, "WSAConnectByNameA should have succeeded, error %u\n", WSAGetLastError());
+    ok(local_len == sizeof(SOCKADDR_IN), "local_len should have been %Iu, got %ld\n", sizeof(SOCKADDR_IN),
+       local_len);
+    ok(remote_len == sizeof(SOCKADDR_IN), "remote_len should have been %Iu, got %ld\n", sizeof(SOCKADDR_IN),
+       remote_len);
+    closesocket(s);
+
+    /* Unknown service */
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = WSAConnectByNameA(s, "winehq.org", "nonexistentservice", NULL, NULL, NULL, NULL, NULL, NULL);
+    err = WSAGetLastError();
+    ok(!ret, "WSAConnectByNameA should have failed\n");
+    ok(err == WSATYPE_NOT_FOUND, "expected error %u (WSATYPE_NOT_FOUND), got %u\n",
+       WSATYPE_NOT_FOUND, err);
+    closesocket(s);
+
+    /* Connecting with a UDP socket */
+    s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ret = WSAConnectByNameA(s, "winehq.org", "https", NULL, NULL, NULL, NULL, NULL, NULL);
+    err = WSAGetLastError();
+    ok(!ret, "WSAConnectByNameA should have failed\n");
+    ok(err == WSAEINVAL || err == WSAEFAULT, "expected error %u (WSAEINVAL) or %u (WSAEFAULT), got %u\n",
+       WSAEINVAL, WSAEFAULT, err); /* WSAEFAULT win10 >= 1809 */
+    closesocket(s);
+
+    /* Passing non-null as the reserved parameter */
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = WSAConnectByNameA(s, "winehq.org", "http", NULL, NULL, NULL, NULL, NULL, &overlap);
+    err = WSAGetLastError();
+    ok(!ret, "WSAConnectByNameA should have failed\n");
+    ok(err == WSAEINVAL, "expected error %u (WSAEINVAL), got %u\n", WSAEINVAL, err);
+    closesocket(s);
+}
+
 static void test_WSAEnumNetworkEvents(void)
 {
     SOCKET s, s2;
@@ -3463,6 +3618,7 @@ static void test_select(void)
     select_thread_params thread_params;
     HANDLE thread_handle;
     DWORD ticks, id, old_protect;
+    unsigned int apc_count;
     unsigned int maxfd, i;
     char *page_pair;
 
@@ -3566,14 +3722,24 @@ static void test_select(void)
 
     FD_ZERO(&readfds);
     FD_SET(fdRead, &readfds);
+    apc_count = 0;
+    ret = QueueUserAPC(apc_func, GetCurrentThread(), (ULONG_PTR)&apc_count);
+    ok(ret, "QueueUserAPC returned %d\n", ret);
     ret = select(fdRead+1, &readfds, NULL, NULL, &select_timeout);
     ok(!ret, "select returned %d\n", ret);
+    ok(apc_count == 1, "got apc_count %d.\n", apc_count);
 
     FD_ZERO(&writefds);
     FD_SET(fdWrite, &writefds);
+    apc_count = 0;
+    ret = QueueUserAPC(apc_func, GetCurrentThread(), (ULONG_PTR)&apc_count);
+    ok(ret, "QueueUserAPC returned %d\n", ret);
     ret = select(fdWrite+1, NULL, &writefds, NULL, &select_timeout);
     ok(ret == 1, "select returned %d\n", ret);
     ok(FD_ISSET(fdWrite, &writefds), "fdWrite socket is not in the set\n");
+    ok(!apc_count, "APC was called\n");
+    SleepEx(0, TRUE);
+    ok(apc_count == 1, "got apc_count %d.\n", apc_count);
 
     /* select the same socket twice */
     writefds.fd_count = 2;
@@ -6581,21 +6747,58 @@ static void test_WSASendTo(void)
     ok(ret_addr.sin_port, "expected nonzero port\n");
 }
 
+struct recv_thread_apc_param
+{
+    SOCKET sock;
+    unsigned int apc_count;
+};
+
+static void WINAPI recv_thread_apc_func(ULONG_PTR param)
+{
+    struct recv_thread_apc_param *p = (struct recv_thread_apc_param *)param;
+    int ret;
+
+    ++p->apc_count;
+
+    ret = send(p->sock, "test", 4, 0);
+    ok(ret == 4, "got %d.\n", ret);
+}
+
+struct recv_thread_param
+{
+    SOCKET sock;
+    BOOL overlapped;
+};
+
 static DWORD WINAPI recv_thread(LPVOID arg)
 {
-    SOCKET sock = *(SOCKET *)arg;
+    struct recv_thread_param *p = arg;
+    SOCKET sock = p->sock;
     char buffer[32];
     WSABUF wsa;
     WSAOVERLAPPED ov;
     DWORD flags = 0;
+    DWORD len;
+    int ret;
 
     wsa.buf = buffer;
     wsa.len = sizeof(buffer);
-    ov.hEvent = WSACreateEvent();
-    WSARecv(sock, &wsa, 1, NULL, &flags, &ov, NULL);
+    if (p->overlapped)
+    {
+        ov.hEvent = WSACreateEvent();
+        WSARecv(sock, &wsa, 1, NULL, &flags, &ov, NULL);
 
-    WaitForSingleObject(ov.hEvent, 1000);
-    WSACloseEvent(ov.hEvent);
+        WaitForSingleObject(ov.hEvent, 1000);
+        WSACloseEvent(ov.hEvent);
+    }
+    else
+    {
+        SetLastError(0xdeadbeef);
+        ret = WSARecv(sock, &wsa, 1, &len, &flags, NULL, NULL);
+        ok(!ret, "got ret %d.\n", ret);
+        ok(WSAGetLastError() == 0, "got error %d.\n", WSAGetLastError());
+        ok(len == 4, "got len %lu.\n", len);
+    }
     return 0;
 }
 
@@ -6609,11 +6812,14 @@ static void WINAPI io_completion(DWORD error, DWORD transferred, WSAOVERLAPPED *
 static void test_WSARecv(void)
 {
     SOCKET src, dest, server = INVALID_SOCKET;
+    struct recv_thread_apc_param apc_param;
+    struct recv_thread_param recv_param;
     char buf[20];
     WSABUF bufs[2];
     WSAOVERLAPPED ov;
     DWORD bytesReturned, flags, id;
     struct sockaddr_in addr;
+    unsigned int apc_count;
     int iret, len;
     DWORD dwret;
     BOOL bret;
@@ -6633,10 +6839,20 @@ static void test_WSARecv(void)
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     bytesReturned = 0xdeadbeef;
+
+    apc_count = 0;
+    dwret = QueueUserAPC(apc_func, GetCurrentThread(), (ULONG_PTR)&apc_count);
+    ok(dwret, "QueueUserAPC returned %lu\n", dwret);
+
     iret = WSARecv(dest, bufs, 1, &bytesReturned, &flags, NULL, NULL);
     ok(!iret, "Expected 0, got %d\n", iret);
     ok(bytesReturned == 2, "Expected 2, got %ld\n", bytesReturned);
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %ld\n", GetLastError());
+
+    ok(!apc_count, "got apc_count %u.\n", apc_count);
+    SleepEx(0, TRUE);
+    ok(apc_count == 1, "got apc_count %u.\n", apc_count);
+
     SetLastError(0xdeadbeef);
     bytesReturned = 0xdeadbeef;
     iret = WSARecv(dest, bufs, 1, &bytesReturned, &flags, NULL, NULL);
@@ -6729,8 +6945,21 @@ static void test_WSARecv(void)
     if (dest == INVALID_SOCKET) goto end;
 
     send(src, "test message", sizeof("test message"), 0);
-    thread = CreateThread(NULL, 0, recv_thread, &dest, 0, &id);
+    recv_param.sock = dest;
+    recv_param.overlapped = TRUE;
+    thread = CreateThread(NULL, 0, recv_thread, &recv_param, 0, &id);
     WaitForSingleObject(thread, 3000);
+    CloseHandle(thread);
+
+    recv_param.overlapped = FALSE;
+    thread = CreateThread(NULL, 0, recv_thread, &recv_param, 0, &id);
+    apc_param.apc_count = 0;
+    apc_param.sock = src;
+    dwret = QueueUserAPC(recv_thread_apc_func, thread, (ULONG_PTR)&apc_param);
+    ok(dwret, "QueueUserAPC returned %lu\n", dwret);
+    WaitForSingleObject(thread, 3000);
+    ok(apc_param.apc_count == 1, "got apc_count %u.\n", apc_param.apc_count);
+
     CloseHandle(thread);
 
     memset(&ov, 0, sizeof(ov));
@@ -7913,6 +8142,15 @@ static void test_AcceptEx(void)
     bret = GetOverlappedResult((HANDLE)listener, &overlapped, &bytesReturned, FALSE);
     ok(bret, "GetOverlappedResult failed, error %ld\n", GetLastError());
     ok(bytesReturned == 0, "bytesReturned isn't supposed to be %ld\n", bytesReturned);
+
+    /* Try to call getsockname on the acceptor socket.
+     *
+     * On Windows, this requires setting SO_UPDATE_ACCEPT_CONTEXT. */
+    iret = setsockopt(acceptor, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (char *)&listener, sizeof(SOCKET));
+    ok(!iret, "Failed to set accept context %ld\n", GetLastError());
+    iret = getsockname(acceptor, (struct sockaddr *)&peerAddress, &remoteSize);
+    ok(!iret, "getsockname failed.\n");
+    ok(remoteSize == sizeof(struct sockaddr_in), "got remote size %u\n", remoteSize);
 
     closesocket(connector);
     connector = INVALID_SOCKET;
@@ -11698,6 +11936,7 @@ static void test_WSAGetOverlappedResult(void)
     NTSTATUS status;
     unsigned int i;
     SOCKET s;
+    HANDLE h;
     BOOL ret;
 
     static const NTSTATUS ranges[][2] =
@@ -11712,7 +11951,19 @@ static void test_WSAGetOverlappedResult(void)
         {0xd0070000, 0xd0080000},
     };
 
+    WSASetLastError(0xdeadbeef);
+    ret = WSAGetOverlappedResult(0xdeadbeef, &overlapped, &size, FALSE, &flags);
+    ok(!ret, "got %d.\n", ret);
+    ok(WSAGetLastError() == WSAENOTSOCK, "got %u.\n", WSAGetLastError());
+
     s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    ret = DuplicateHandle(GetCurrentProcess(), (HANDLE)s, GetCurrentProcess(), &h, 0, FALSE, DUPLICATE_SAME_ACCESS);
+    ok(ret, "got %d.\n", ret);
+    ret = WSAGetOverlappedResult((SOCKET)h, &overlapped, &size, FALSE, &flags);
+    ok(!ret, "got %d.\n", ret);
+    ok(WSAGetLastError() == WSAENOTSOCK, "got %u.\n", WSAGetLastError());
+    CloseHandle(h);
 
     for (i = 0; i < ARRAY_SIZE(ranges); ++i)
     {
@@ -12573,6 +12824,7 @@ START_TEST( sock )
 
     test_WSASocket();
     test_WSADuplicateSocket();
+    test_WSAConnectByName();
     test_WSAEnumNetworkEvents();
 
     test_errors();

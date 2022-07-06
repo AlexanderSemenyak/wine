@@ -21,6 +21,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <IOKit/pwr_mgt/IOPMLib.h>
@@ -31,8 +35,6 @@
 #undef LoadResource
 
 #include "macdrv.h"
-#include "winuser.h"
-#include "wine/unicode.h"
 #include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(macdrv);
@@ -396,8 +398,8 @@ static void sync_window_region(struct macdrv_win_data *data, HRGN win_region)
         NtUserMirrorRgn(data->hwnd, hrgn);
     if (hrgn)
     {
-        OffsetRgn(hrgn, data->window_rect.left - data->whole_rect.left,
-                  data->window_rect.top - data->whole_rect.top);
+        NtGdiOffsetRgn(hrgn, data->window_rect.left - data->whole_rect.left,
+                       data->window_rect.top - data->whole_rect.top);
     }
     region_data = get_region_data(hrgn, 0);
     if (region_data)
@@ -540,7 +542,8 @@ static void sync_window_min_max_info(HWND hwnd)
     primary_monitor_rect.left = primary_monitor_rect.top = 0;
     primary_monitor_rect.right = NtUserGetSystemMetrics(SM_CXSCREEN);
     primary_monitor_rect.bottom = NtUserGetSystemMetrics(SM_CYSCREEN);
-    AdjustWindowRectEx(&primary_monitor_rect, adjustedStyle, ((style & WS_POPUP) && GetMenu(hwnd)), exstyle);
+    AdjustWindowRectEx(&primary_monitor_rect, adjustedStyle,
+                       ((style & WS_POPUP) && NtUserGetWindowLongPtrW(hwnd, GWLP_ID)), exstyle);
 
     xinc = -primary_monitor_rect.left;
     yinc = -primary_monitor_rect.top;
@@ -710,7 +713,7 @@ static void create_cocoa_window(struct macdrv_win_data *data)
 
     /* set the window text */
     if (!NtUserInternalGetWindowText(data->hwnd, text, ARRAY_SIZE(text))) text[0] = 0;
-    macdrv_set_cocoa_window_title(data->cocoa_window, text, strlenW(text));
+    macdrv_set_cocoa_window_title(data->cocoa_window, text, wcslen(text));
 
     /* set the window region */
     if (win_rgn || IsRectEmpty(&data->window_rect)) sync_window_region(data, win_rgn);
@@ -1592,19 +1595,6 @@ LRESULT macdrv_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return NtUserMessageCall(hwnd, msg, wp, lp, 0, NtUserDefWindowProc, FALSE);
 }
 
-/**********************************************************************
- *              CreateWindow   (MACDRV.@)
- */
-BOOL macdrv_CreateWindow(HWND hwnd)
-{
-    if (hwnd == NtUserGetDesktopWindow())
-    {
-        macdrv_init_clipboard();
-    }
-    return TRUE;
-}
-
-
 /***********************************************************************
  *              DestroyWindow   (MACDRV.@)
  */
@@ -1781,7 +1771,7 @@ void macdrv_SetWindowText(HWND hwnd, LPCWSTR text)
     TRACE("%p, %s\n", hwnd, debugstr_w(text));
 
     if ((win = macdrv_get_cocoa_window(hwnd, FALSE)))
-        macdrv_set_cocoa_window_title(win, text, strlenW(text));
+        macdrv_set_cocoa_window_title(win, text, wcslen(text));
 }
 
 
@@ -1848,7 +1838,8 @@ LRESULT macdrv_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
 
     /* prevent a simple ALT press+release from activating the system menu,
        as that can get confusing */
-    if (command == SC_KEYMENU && !(WCHAR)lparam && !GetMenu(hwnd) &&
+    if (command == SC_KEYMENU && !(WCHAR)lparam &&
+        !NtUserGetWindowLongPtrW(hwnd, GWLP_ID) &&
         (NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_SYSMENU))
     {
         TRACE("ignoring SC_KEYMENU wp %lx lp %lx\n", wparam, lparam);
@@ -2359,7 +2350,7 @@ void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event)
         if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
         {
             TRACE("setting foreground window to %p\n", hwnd);
-            NtUserSetForegroundWindow(hwnd, FALSE);
+            NtUserSetForegroundWindow(hwnd);
             return;
         }
     }
@@ -2384,7 +2375,7 @@ void macdrv_window_lost_focus(HWND hwnd, const macdrv_event *event)
     {
         send_message(hwnd, WM_CANCELMODE, 0, 0);
         if (hwnd == NtUserGetForegroundWindow())
-            NtUserSetForegroundWindow(NtUserGetDesktopWindow(), FALSE);
+            NtUserSetForegroundWindow(NtUserGetDesktopWindow());
     }
 }
 
@@ -2413,7 +2404,7 @@ void macdrv_app_deactivated(void)
     if (get_active_window() == NtUserGetForegroundWindow())
     {
         TRACE("setting fg to desktop\n");
-        NtUserSetForegroundWindow(NtUserGetDesktopWindow(), FALSE);
+        NtUserSetForegroundWindow(NtUserGetDesktopWindow());
     }
 }
 
@@ -2582,7 +2573,7 @@ void macdrv_window_drag_begin(HWND hwnd, const macdrv_event *event)
         if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
         {
             TRACE("setting foreground window to %p\n", hwnd);
-            NtUserSetForegroundWindow(hwnd, FALSE);
+            NtUserSetForegroundWindow(hwnd);
         }
     }
 
@@ -2664,114 +2655,6 @@ void macdrv_reassert_window_position(HWND hwnd)
 }
 
 
-struct quit_info {
-    HWND               *wins;
-    UINT                capacity;
-    UINT                count;
-    UINT                done;
-    DWORD               flags;
-    BOOL                result;
-    BOOL                replied;
-};
-
-
-static BOOL CALLBACK get_process_windows(HWND hwnd, LPARAM lp)
-{
-    struct quit_info *qi = (struct quit_info*)lp;
-    DWORD pid;
-
-    NtUserGetWindowThread(hwnd, &pid);
-    if (pid == GetCurrentProcessId())
-    {
-        if (qi->count >= qi->capacity)
-        {
-            UINT new_cap = qi->capacity * 2;
-            HWND *new_wins = realloc(qi->wins, new_cap * sizeof(*qi->wins));
-            if (!new_wins) return FALSE;
-            qi->wins = new_wins;
-            qi->capacity = new_cap;
-        }
-
-        qi->wins[qi->count++] = hwnd;
-    }
-
-    return TRUE;
-}
-
-
-static void CALLBACK quit_callback(HWND hwnd, UINT msg, ULONG_PTR data, LRESULT result)
-{
-    struct quit_info *qi = (struct quit_info*)data;
-
-    qi->done++;
-
-    if (msg == WM_QUERYENDSESSION)
-    {
-        TRACE("got WM_QUERYENDSESSION result %ld from win %p (%u of %u done)\n", result,
-              hwnd, qi->done, qi->count);
-
-        if (!result && !IsWindow(hwnd))
-        {
-            TRACE("win %p no longer exists; ignoring apparent refusal\n", hwnd);
-            result = TRUE;
-        }
-
-        if (!result && qi->result)
-        {
-            qi->result = FALSE;
-
-            /* On the first FALSE from WM_QUERYENDSESSION, we already know the
-               ultimate reply.  Might as well tell Cocoa now. */
-            if (!qi->replied)
-            {
-                qi->replied = TRUE;
-                TRACE("giving quit reply %d\n", qi->result);
-                macdrv_quit_reply(qi->result);
-            }
-        }
-
-        if (qi->done >= qi->count)
-        {
-            UINT i;
-
-            qi->done = 0;
-            for (i = 0; i < qi->count; i++)
-            {
-                TRACE("sending WM_ENDSESSION to win %p result %d flags 0x%08x\n", qi->wins[i],
-                      qi->result, qi->flags);
-                if (!SendMessageCallbackW(qi->wins[i], WM_ENDSESSION, qi->result, qi->flags,
-                                          quit_callback, (ULONG_PTR)qi))
-                {
-                    WARN("failed to send WM_ENDSESSION to win %p; error 0x%08x\n",
-                         qi->wins[i], GetLastError());
-                    quit_callback(qi->wins[i], WM_ENDSESSION, (ULONG_PTR)qi, 0);
-                }
-            }
-        }
-    }
-    else /* WM_ENDSESSION */
-    {
-        TRACE("finished WM_ENDSESSION for win %p (%u of %u done)\n", hwnd, qi->done, qi->count);
-
-        if (qi->done >= qi->count)
-        {
-            if (!qi->replied)
-            {
-                TRACE("giving quit reply %d\n", qi->result);
-                macdrv_quit_reply(qi->result);
-            }
-
-            TRACE("%sterminating process\n", qi->result ? "" : "not ");
-            if (qi->result)
-                TerminateProcess(GetCurrentProcess(), 0);
-
-            free(qi->wins);
-            free(qi);
-        }
-    }
-}
-
-
 /***********************************************************************
  *              macdrv_app_quit_requested
  *
@@ -2779,66 +2662,14 @@ static void CALLBACK quit_callback(HWND hwnd, UINT msg, ULONG_PTR data, LRESULT 
  */
 void macdrv_app_quit_requested(const macdrv_event *event)
 {
-    struct quit_info *qi;
-    UINT i;
+    struct app_quit_request_params params = { .flags = 0 };
 
     TRACE("reason %d\n", event->app_quit_requested.reason);
 
-    qi = malloc(sizeof(*qi));
-    if (!qi)
-        goto fail;
+    if (event->app_quit_requested.reason == QUIT_REASON_LOGOUT)
+        params.flags = ENDSESSION_LOGOFF;
 
-    qi->capacity = 32;
-    qi->wins = malloc(qi->capacity * sizeof(*qi->wins));
-    qi->count = qi->done = 0;
-
-    if (!qi->wins || !EnumWindows(get_process_windows, (LPARAM)qi))
-        goto fail;
-
-    switch (event->app_quit_requested.reason)
-    {
-        case QUIT_REASON_LOGOUT:
-        default:
-            qi->flags = ENDSESSION_LOGOFF;
-            break;
-        case QUIT_REASON_RESTART:
-        case QUIT_REASON_SHUTDOWN:
-            qi->flags = 0;
-            break;
-    }
-
-    qi->result = TRUE;
-    qi->replied = FALSE;
-
-    for (i = 0; i < qi->count; i++)
-    {
-        TRACE("sending WM_QUERYENDSESSION to win %p\n", qi->wins[i]);
-        if (!SendMessageCallbackW(qi->wins[i], WM_QUERYENDSESSION, 0, qi->flags,
-                                  quit_callback, (ULONG_PTR)qi))
-        {
-            DWORD error = GetLastError();
-            BOOL invalid = (error == ERROR_INVALID_WINDOW_HANDLE);
-            if (invalid)
-                TRACE("failed to send WM_QUERYENDSESSION to win %p because it's invalid; assuming success\n",
-                     qi->wins[i]);
-            else
-                WARN("failed to send WM_QUERYENDSESSION to win %p; error 0x%08x; assuming refusal\n",
-                     qi->wins[i], error);
-            quit_callback(qi->wins[i], WM_QUERYENDSESSION, (ULONG_PTR)qi, invalid);
-        }
-    }
-
-    /* quit_callback() will clean up qi */
-    return;
-
-fail:
-    WARN("failed to allocate window list\n");
-    if (qi)
-    {
-        free(qi->wins);
-        free(qi);
-    }
-    macdrv_quit_reply(FALSE);
+    macdrv_client_func(client_func_app_quit_request, &params, sizeof(params));
 }
 
 

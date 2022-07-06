@@ -647,6 +647,9 @@ static void textrange_set_font(ITextRange *range, ITextFont *font)
         cursor_from_char_ofs( services->editor, start, &from );
         cursor_from_char_ofs( services->editor, end, &to );
         ME_SetCharFormat( services->editor, &from, &to, &fmt );
+        ME_CommitUndo( services->editor );
+        ME_WrapMarkedParagraphs( services->editor );
+        ME_UpdateScrollBar( services->editor );
     }
 }
 
@@ -805,6 +808,9 @@ static HRESULT set_textfont_prop(ITextFontImpl *font, enum textfont_prop_id prop
     cursor_from_char_ofs( services->editor, start, &from );
     cursor_from_char_ofs( services->editor, end, &to );
     ME_SetCharFormat( services->editor, &from, &to, &fmt );
+    ME_CommitUndo( services->editor );
+    ME_WrapMarkedParagraphs( services->editor );
+    ME_UpdateScrollBar( services->editor );
 
     return S_OK;
 }
@@ -5733,6 +5739,7 @@ void ME_GetOLEObjectSize(const ME_Context *c, ME_Run *run, SIZE *pSize)
 void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
 {
   IDataObject*  ido;
+  IViewObject*  ivo;
   FORMATETC     fmt;
   STGMEDIUM     stgm;
   DIBSECTION    dibsect;
@@ -5745,6 +5752,34 @@ void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
 
   assert(run->nFlags & MERF_GRAPHICS);
   assert(run->reobj);
+
+  if (SUCCEEDED(IOleObject_QueryInterface(run->reobj->obj.poleobj, &IID_IViewObject, (void**)&ivo)))
+  {
+    HRESULT hr;
+    RECTL bounds;
+
+    convert_sizel(c, &run->reobj->obj.sizel, &sz);
+    if (c->editor->nZoomNumerator != 0)
+    {
+      sz.cx = MulDiv(sz.cx, c->editor->nZoomNumerator, c->editor->nZoomDenominator);
+      sz.cy = MulDiv(sz.cy, c->editor->nZoomNumerator, c->editor->nZoomDenominator);
+    }
+
+    bounds.left = x;
+    bounds.top = y - sz.cy;
+    bounds.right = x + sz.cx;
+    bounds.bottom = y;
+
+    hr = IViewObject_Draw(ivo, DVASPECT_CONTENT, -1, 0, 0, 0, c->hDC, &bounds, NULL, NULL, 0);
+    if (FAILED(hr))
+    {
+      WARN("failed to draw object: %#08lx\n", hr);
+    }
+
+    IViewObject_Release(ivo);
+    return;
+  }
+
   if (IOleObject_QueryInterface(run->reobj->obj.poleobj, &IID_IDataObject, (void**)&ido) != S_OK)
   {
     FIXME("Couldn't get interface\n");

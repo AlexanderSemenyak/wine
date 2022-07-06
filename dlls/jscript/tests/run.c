@@ -114,6 +114,7 @@ DEFINE_EXPECT(testobj_newenum);
 DEFINE_EXPECT(testobj_getidfail_d);
 DEFINE_EXPECT(testobj_tolocalestr_d);
 DEFINE_EXPECT(testobj_tolocalestr_i);
+DEFINE_EXPECT(testdestrobj);
 DEFINE_EXPECT(enumvariant_next_0);
 DEFINE_EXPECT(enumvariant_next_1);
 DEFINE_EXPECT(enumvariant_reset);
@@ -172,6 +173,7 @@ DEFINE_EXPECT(BindHandler);
 #define DISPID_GLOBAL_VDATE         0x1023
 #define DISPID_GLOBAL_VCY           0x1024
 #define DISPID_GLOBAL_TODOWINE      0x1025
+#define DISPID_GLOBAL_TESTDESTROBJ  0x1026
 
 #define DISPID_GLOBAL_TESTPROPDELETE      0x2000
 #define DISPID_GLOBAL_TESTNOPROPDELETE    0x2001
@@ -342,6 +344,7 @@ static HRESULT WINAPI DispatchEx_QueryInterface(IDispatchEx *iface, REFIID riid,
     else
         return E_NOINTERFACE;
 
+    IUnknown_AddRef((IUnknown *)*ppv);
     return S_OK;
 }
 
@@ -625,6 +628,40 @@ static IDispatchExVtbl testObjVtbl = {
 };
 
 static IDispatchEx testObj = { &testObjVtbl };
+
+static LONG test_destr_ref;
+
+static ULONG WINAPI testDestrObj_AddRef(IDispatchEx *iface)
+{
+    return ++test_destr_ref;
+}
+
+static ULONG WINAPI testDestrObj_Release(IDispatchEx *iface)
+{
+    if (!--test_destr_ref)
+        CHECK_EXPECT(testdestrobj);
+    return test_destr_ref;
+}
+
+static IDispatchExVtbl testDestrObjVtbl = {
+    DispatchEx_QueryInterface,
+    testDestrObj_AddRef,
+    testDestrObj_Release,
+    DispatchEx_GetTypeInfoCount,
+    DispatchEx_GetTypeInfo,
+    DispatchEx_GetIDsOfNames,
+    DispatchEx_Invoke,
+    DispatchEx_GetDispID,
+    DispatchEx_InvokeEx,
+    DispatchEx_DeleteMemberByName,
+    DispatchEx_DeleteMemberByDispID,
+    DispatchEx_GetMemberProperties,
+    DispatchEx_GetMemberName,
+    DispatchEx_GetNextDispID,
+    DispatchEx_GetNameSpaceParent
+};
+
+static IDispatchEx testDestrObj = { &testDestrObjVtbl };
 
 static HRESULT WINAPI dispexFunc_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
         VARIANT *res, EXCEPINFO *pei, IServiceProvider *pspCaller)
@@ -1065,6 +1102,11 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         return S_OK;
     }
 
+    if(!lstrcmpW(bstrName, L"testDestrObj")) {
+        *pid = DISPID_GLOBAL_TESTDESTROBJ;
+        return S_OK;
+    }
+
     if(strict_dispid_check && lstrcmpW(bstrName, L"t"))
         ok(0, "unexpected call %s\n", wine_dbgstr_w(bstrName));
     return DISP_E_UNKNOWNNAME;
@@ -1266,6 +1308,22 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
 
         V_VT(pvarRes) = VT_DISPATCH;
         V_DISPATCH(pvarRes) = (IDispatch*)&testObj;
+        return S_OK;
+
+    case DISPID_GLOBAL_TESTDESTROBJ:
+        ok(wFlags == INVOKE_PROPERTYGET, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(!pdp->rgvarg, "rgvarg != NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pdp->cArgs, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(V_VT(pvarRes) ==  VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+        ok(pei != NULL, "pei == NULL\n");
+
+        V_VT(pvarRes) = VT_DISPATCH;
+        V_DISPATCH(pvarRes) = (IDispatch*)&testDestrObj;
+        IDispatch_AddRef(V_DISPATCH(pvarRes));
         return S_OK;
 
     case DISPID_GLOBAL_PUREDISP:
@@ -2914,13 +2972,20 @@ static void test_default_value(void)
 
     V_VT(&v) = VT_EMPTY;
     hres = IDispatch_Invoke(disp, DISPID_VALUE, &IID_NULL, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
-    ok(hres == S_OK || broken(hres == 0x8000ffff), "Invoke failed: %08lx\n", hres);
-    if(hres == S_OK)
-    {
-        ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
-    }
+    ok(hres == E_UNEXPECTED, "Invoke failed: %08lx\n", hres);
+
+    hres = parse_script_expr(L"new Date()", &v, &script);
+    ok(hres == S_OK, "parse_script_expr failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+    disp = V_DISPATCH(&v);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IDispatch_Invoke(disp, DISPID_VALUE, &IID_NULL, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "Invoke failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
     VariantClear(&v);
     IDispatch_Release(disp);
+    close_script(script);
 
     hres = parse_script_expr(L"var arr = [5]; arr.toString = function() {return \"foo\";}; arr.valueOf = function() {return 42;}; arr", &v, &script);
     ok(hres == S_OK, "parse_script_expr failed: %08lx\n", hres);
@@ -3149,15 +3214,15 @@ static void test_script_exprs(void)
 
 static void test_invokeex(void)
 {
-    DISPID func_id, prop_id;
-    DISPPARAMS dp = {NULL};
+    DISPPARAMS dp = {NULL}, dp_max = {NULL};
+    DISPID func_id, max_id, prop_id;
     IActiveScript *script;
     IDispatchEx *dispex;
     VARIANT v, arg;
     BSTR str;
     HRESULT hres;
 
-    hres = parse_script_expr(L"var o = {func: function() {return 3;}, prop: 6}; o", &v, &script);
+    hres = parse_script_expr(L"var o = {func: function() {return 3;}, max: Math.max, prop: 6}; o", &v, &script);
     ok(hres == S_OK, "parse_script_expr failed: %08lx\n", hres);
     ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
 
@@ -3170,15 +3235,30 @@ static void test_invokeex(void)
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
 
+    str = SysAllocString(L"max");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &max_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
+
     str = SysAllocString(L"prop");
     hres = IDispatchEx_GetDispID(dispex, str, 0, &prop_id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
 
+    dp_max.rgvarg = &arg;
+    dp_max.cArgs = 1;
+    V_VT(&arg) = VT_I4;
+    V_I4(&arg) = 42;
+
     hres = IDispatchEx_InvokeEx(dispex, func_id, 0, DISPATCH_METHOD, &dp, &v, NULL, NULL);
     ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
     ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
     ok(V_I4(&v) == 3, "V_I4(v) = %ld\n", V_I4(&v));
+
+    hres = IDispatchEx_InvokeEx(dispex, max_id, 0, DISPATCH_METHOD, &dp_max, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_I4(&v) == 42, "V_I4(v) = %ld\n", V_I4(&v));
 
     hres = IDispatchEx_InvokeEx(dispex, prop_id, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
     ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
@@ -3193,13 +3273,85 @@ static void test_invokeex(void)
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
 
+    V_VT(&v) = VT_EMPTY;
     hres = IDispatchEx_InvokeEx(dispex, func_id, 0, DISPATCH_METHOD, &dp, &v, NULL, NULL);
     ok(hres == E_UNEXPECTED || broken(hres == 0x800a1393), "InvokeEx failed: %08lx\n", hres);
 
+    V_VT(&v) = VT_EMPTY;
+    hres = IDispatchEx_InvokeEx(dispex, max_id, 0, DISPATCH_METHOD, &dp_max, &v, NULL, NULL);
+    ok(hres == E_UNEXPECTED || broken(hres == 0x800a1393), "InvokeEx failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
     hres = IDispatchEx_InvokeEx(dispex, prop_id, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
     ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
     ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
     ok(V_I4(&v) == 6, "V_I4(v) = %ld\n", V_I4(&v));
+
+    IActiveScript_Close(script);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IDispatchEx_InvokeEx(dispex, prop_id, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_I4(&v) == 6, "V_I4(v) = %ld\n", V_I4(&v));
+
+    IDispatchEx_Release(dispex);
+    IActiveScript_Release(script);
+
+    hres = parse_script_expr(L"Math.max", &v, &script);
+    ok(hres == S_OK, "parse_script_expr failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+
+    hres = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx iface: %08lx\n", hres);
+    VariantClear(&v);
+
+    str = SysAllocString(L"call");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &func_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
+
+    hres = IActiveScript_SetScriptState(script, SCRIPTSTATE_UNINITIALIZED);
+    ok(hres == S_OK, "SetScriptState(SCRIPTSTATE_STARTED) failed: %08lx\n", hres);
+
+    str = SysAllocString(L"call");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &func_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
+
+    str = SysAllocString(L"length");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &prop_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
+
+    hres = IDispatchEx_InvokeEx(dispex, func_id, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IDispatchEx_InvokeEx(dispex, prop_id, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_I4(&v) == 2, "V_I4(v) = %ld\n", V_I4(&v));
+
+    IDispatchEx_Release(dispex);
+    IActiveScript_Release(script);
+
+    hres = parse_script_expr(L"Math.max", &v, &script);
+    ok(hres == S_OK, "parse_script_expr failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+
+    hres = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx iface: %08lx\n", hres);
+    VariantClear(&v);
+
+    hres = IActiveScript_SetScriptState(script, SCRIPTSTATE_UNINITIALIZED);
+    ok(hres == S_OK, "SetScriptState(SCRIPTSTATE_STARTED) failed: %08lx\n", hres);
+
+    str = SysAllocString(L"call");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &func_id);
+    SysFreeString(str);
+    ok(hres == E_UNEXPECTED, "GetDispID failed: %08lx\n", hres);
 
     IDispatchEx_Release(dispex);
     IActiveScript_Release(script);
@@ -3289,6 +3441,25 @@ static void test_invokeex(void)
     ok(V_I4(&v) == 42, "V_I4(v) = %s\n", wine_dbgstr_variant(&v));
 
     IDispatchEx_Release(dispex);
+    IActiveScript_Release(script);
+}
+
+static void test_destructors(void)
+{
+    IActiveScript *script;
+    VARIANT v;
+    HRESULT hres;
+
+    V_VT(&v) = VT_EMPTY;
+    hres = parse_script_expr(L"Math.ref = testDestrObj, isNaN.ref = testDestrObj, true", &v, &script);
+    ok(hres == S_OK, "parse_script_expr failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_BOOL, "V_VT(v) = %d\n", V_VT(&v));
+
+    SET_EXPECT(testdestrobj);
+    hres = IActiveScript_SetScriptState(script, SCRIPTSTATE_UNINITIALIZED);
+    ok(hres == S_OK, "SetScriptState(SCRIPTSTATE_UNINITIALIZED) failed: %08lx\n", hres);
+    CHECK_CALLED(testdestrobj);
+
     IActiveScript_Release(script);
 }
 
@@ -3820,6 +3991,7 @@ static BOOL run_tests(void)
 
     test_script_exprs();
     test_invokeex();
+    test_destructors();
     test_eval();
     test_error_reports();
 

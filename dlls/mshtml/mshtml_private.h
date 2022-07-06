@@ -282,6 +282,7 @@ typedef struct EventTarget EventTarget;
     XIID(IWineHTMLElementPrivate) \
     XIID(IWineHTMLWindowPrivate) \
     XIID(IWineHTMLWindowCompatPrivate) \
+    XIID(IWineXMLHttpRequestPrivate) \
     XIID(IWineMSHTMLConsole)
 
 typedef enum {
@@ -944,7 +945,7 @@ HRESULT create_namespace_collection(compat_mode_t,IHTMLNamespaceCollection**) DE
 HRESULT create_dom_implementation(HTMLDocumentNode*,IHTMLDOMImplementation**) DECLSPEC_HIDDEN;
 void detach_dom_implementation(IHTMLDOMImplementation*) DECLSPEC_HIDDEN;
 
-HRESULT create_html_storage(compat_mode_t,IHTMLStorage**) DECLSPEC_HIDDEN;
+HRESULT create_html_storage(compat_mode_t,IUri*,IHTMLStorage**) DECLSPEC_HIDDEN;
 
 void HTMLDocument_Persist_Init(HTMLDocument*) DECLSPEC_HIDDEN;
 void HTMLDocument_OleCmd_Init(HTMLDocument*) DECLSPEC_HIDDEN;

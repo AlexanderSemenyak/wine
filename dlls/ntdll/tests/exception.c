@@ -2123,7 +2123,7 @@ static void call_virtual_unwind( int testnum, const struct unwind_test *test )
         ok( handler == expected_handler || broken( test->broken_results && handler == broken_handler ),
                 "%u/%u: wrong handler %p/%p\n", testnum, i, handler, expected_handler );
         if (handler)
-            ok( *(DWORD *)data == 0x08070605, "%u/%u: wrong handler data %p\n", testnum, i, data );
+            ok( *(DWORD *)data == 0x08070605, "%u/%u: wrong handler data %lx\n", testnum, i, *(DWORD *)data );
         else
             ok( data == (void *)0xdeadbeef, "%u/%u: handler data set to %p\n", testnum, i, data );
 
@@ -5140,11 +5140,10 @@ static void call_virtual_unwind( int testnum, const struct unwind_test *test )
                                     &runtime_func, &context, &data, &frame, &ctx_ptr );
         if (test->results[i].handler > 0)
         {
-            /* Yet untested */
             ok( (char *)handler == (char *)code_mem + 0x200,
                 "%u/%u: wrong handler %p/%p\n", testnum, i, handler, (char *)code_mem + 0x200 );
             if (handler) ok( *(DWORD *)data == 0x08070605,
-                             "%u/%u: wrong handler data %p\n", testnum, i, data );
+                             "%u/%u: wrong handler data %lx\n", testnum, i, *(DWORD *)data );
         }
         else
         {
@@ -5278,7 +5277,7 @@ static void test_virtual_unwind(void)
 
     static const DWORD unwind_info_0_header =
         (sizeof(function_0)/2) | /* function length */
-        (0 << 20) | /* X */
+        (1 << 20) | /* X */
         (0 << 21) | /* E */
         (0 << 22) | /* F */
         (1 << 23) | /* epilog */
@@ -5309,6 +5308,10 @@ static void test_virtual_unwind(void)
         UWOP_ALLOC_SMALL(32),         /* add sp,  sp,  #32 */
         UWOP_SAVE_RANGE_4_7_LR(6, 1), /* pop {r4-r6,pc} */
         UWOP_END,
+
+        0, 0,                         /* align */
+        0x00, 0x02, 0x00, 0x00,       /* handler */
+        0x05, 0x06, 0x07, 0x08,       /* data */
     };
 
     static const struct results results_0[] =
@@ -5323,7 +5326,7 @@ static void test_virtual_unwind(void)
         { 0x12,  0x10,  0,     0x5c,    0x060, TRUE, { {r4,0x50}, {r5,0x54}, {r6,0x58}, {lr,0x5c}, {d8, 0x1c00000018}, {d9, 0x2400000020}, {d10, 0x2c00000028}, {d3, 0x400000000}, {d4, 0xc00000008}, {d5, 0x1400000010}, {-1,-1} }},
         { 0x16,  0x10,  0,     0x74,    0x078, TRUE, { {r4,0x68}, {r5,0x6c}, {r6,0x70}, {lr,0x74}, {d8, 0x3400000030}, {d9, 0x3c00000038}, {d10, 0x4400000040}, {d3, 0x1c00000018}, {d4, 0x2400000020}, {d5, 0x2c00000028}, {d17, 0x400000000}, {d18, 0xc00000008}, {d19, 0x1400000010}, {-1,-1} }},
         { 0x1a,  0x10,  0,     0x80,    0x084, TRUE, { {r4,0x74}, {r5,0x78}, {r6,0x7c}, {lr,0x80}, {d8, 0x400000003c}, {d9, 0x4800000044}, {d10, 0x500000004c}, {d3, 0x2800000024}, {d4, 0x300000002c}, {d5, 0x3800000034}, {d17, 0x100000000c}, {d18, 0x1800000014}, {d19, 0x200000001c}, {r8,0x00}, {r10,0x04}, {r12,0x08}, {-1,-1} }},
-        { 0x1c,  0x10,  0,     0x90,    0x094, TRUE, { {r4,0x84}, {r5,0x88}, {r6,0x8c}, {lr,0x90}, {d8, 0x500000004c}, {d9, 0x5800000054}, {d10, 0x600000005c}, {d3, 0x3800000034}, {d4, 0x400000003c}, {d5, 0x4800000044}, {d17, 0x200000001c}, {d18, 0x2800000024}, {d19, 0x300000002c}, {r8,0x10}, {r10,0x14}, {r12,0x18}, {-1,-1} }},
+        { 0x1c,  0x10,  1,     0x90,    0x094, TRUE, { {r4,0x84}, {r5,0x88}, {r6,0x8c}, {lr,0x90}, {d8, 0x500000004c}, {d9, 0x5800000054}, {d10, 0x600000005c}, {d3, 0x3800000034}, {d4, 0x400000003c}, {d5, 0x4800000044}, {d17, 0x200000001c}, {d18, 0x2800000024}, {d19, 0x300000002c}, {r8,0x10}, {r10,0x14}, {r12,0x18}, {-1,-1} }},
         { 0x1e,  0x10,  0,     0x3c,    0x040, TRUE, { {r4,0x30}, {r5,0x34}, {r6,0x38}, {lr,0x3c}, {d8, 0x400000000}, {d9, 0xc00000008}, {d10, 0x1400000010}, {-1,-1} }},
         { 0x22,  0x10,  0,     0x3c,    0x040, TRUE, { {r4,0x30}, {r5,0x34}, {r6,0x38}, {lr,0x3c}, {-1,-1} }},
         { 0x24,  0x10,  0,     0x2c,    0x030, TRUE, { {r4,0x20}, {r5,0x24}, {r6,0x28}, {lr,0x2c}, {-1,-1} }},
@@ -6818,11 +6821,10 @@ static void call_virtual_unwind( int testnum, const struct unwind_test *test )
                                     &runtime_func, &context, &data, &frame, &ctx_ptr );
         if (test->results[i].handler > 0)
         {
-            /* Yet untested */
             ok( (char *)handler == (char *)code_mem + 0x200,
                 "%u/%u: wrong handler %p/%p\n", testnum, i, handler, (char *)code_mem + 0x200 );
             if (handler) ok( *(DWORD *)data == 0x08070605,
-                             "%u/%u: wrong handler data %p\n", testnum, i, data );
+                             "%u/%u: wrong handler data %lx\n", testnum, i, *(DWORD *)data );
         }
         else
         {
@@ -6934,7 +6936,7 @@ static void test_virtual_unwind(void)
 
     static const DWORD unwind_info_0_header =
         (sizeof(function_0)/4) | /* function length */
-        (0 << 20) | /* X */
+        (1 << 20) | /* X */
         (0 << 21) | /* E */
         (1 << 22) | /* epilog */
         (2 << 27);  /* codes */
@@ -6954,6 +6956,9 @@ static void test_virtual_unwind(void)
         UWOP_SAVE_REGP(19, 16), /* stp x19, x20, [sp, #16] */
         UWOP_ALLOC_SMALL(32),   /* sub sp,  sp,  #32 */
         UWOP_END,
+
+        0x00, 0x02, 0x00, 0x00, /* handler */
+        0x05, 0x06, 0x07, 0x08, /* data */
     };
 
     static const struct results results_0[] =
@@ -6961,7 +6966,7 @@ static void test_virtual_unwind(void)
       /* offset  fp    handler  pc      frame offset  registers */
         { 0x00,  0x00,  0,     ORIG_LR, 0x000, TRUE, { {-1,-1} }},
         { 0x04,  0x00,  0,     ORIG_LR, 0x020, TRUE, { {-1,-1} }},
-        { 0x08,  0x00,  0,     ORIG_LR, 0x020, TRUE, { {x19,0x10}, {x20,0x18}, {-1,-1} }},
+        { 0x08,  0x00,  1,     ORIG_LR, 0x020, TRUE, { {x19,0x10}, {x20,0x18}, {-1,-1} }},
         { 0x0c,  0x00,  0,     ORIG_LR, 0x020, TRUE, { {x19,0x10}, {x20,0x18}, {-1,-1} }},
         { 0x10,  0x00,  0,     ORIG_LR, 0x020, TRUE, { {-1,-1} }},
         { 0x14,  0x00,  0,     ORIG_LR, 0x000, TRUE, { {-1,-1} }},
@@ -8417,6 +8422,90 @@ static void test_ripevent(DWORD numexc)
     pRtlRemoveVectoredExceptionHandler(vectored_handler);
 }
 
+static void subtest_fastfail(unsigned int code)
+{
+    char cmdline[MAX_PATH];
+    PROCESS_INFORMATION pi;
+    STARTUPINFOA si = { 0 };
+    DEBUG_EVENT de;
+    DWORD continuestatus;
+    BOOL ret;
+    BOOL had_ff = FALSE, had_se = FALSE;
+
+    sprintf(cmdline, "%s %s %s %u", my_argv[0], my_argv[1], "fastfail", code);
+    si.cb = sizeof(si);
+    ret = CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, DEBUG_PROCESS, NULL, NULL, &si, &pi);
+    ok(ret, "could not create child process error: %lu\n", GetLastError());
+    if (!ret)
+        return;
+
+    do
+    {
+        continuestatus = DBG_CONTINUE;
+        ok(WaitForDebugEvent(&de, INFINITE), "reading debug event\n");
+
+        if (de.dwDebugEventCode == EXCEPTION_DEBUG_EVENT)
+        {
+            if (de.u.Exception.ExceptionRecord.ExceptionCode == STATUS_STACK_BUFFER_OVERRUN)
+            {
+                ok(!de.u.Exception.dwFirstChance, "must be a second chance exception\n");
+                ok(de.u.Exception.ExceptionRecord.NumberParameters == 1, "expected exactly one parameter, got %lu\n",
+                   de.u.Exception.ExceptionRecord.NumberParameters);
+                ok(de.u.Exception.ExceptionRecord.ExceptionInformation[0] == code, "expected %u for code, got %Iu\n",
+                   code, de.u.Exception.ExceptionRecord.ExceptionInformation[0]);
+                had_ff = TRUE;
+            }
+
+            if (de.u.Exception.dwFirstChance)
+            {
+                continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+            }
+            else
+            {
+                had_se = TRUE;
+                pNtTerminateProcess(pi.hProcess, 0);
+            }
+        }
+
+        ContinueDebugEvent(de.dwProcessId, de.dwThreadId, continuestatus);
+
+    } while (de.dwDebugEventCode != EXIT_PROCESS_DEBUG_EVENT);
+
+    ok(had_ff || broken(had_se) /* Win7 */, "fast fail did not occur\n");
+
+    wait_child_process( pi.hProcess );
+    ret = CloseHandle(pi.hThread);
+    ok(ret, "error %lu\n", GetLastError());
+    ret = CloseHandle(pi.hProcess);
+    ok(ret, "error %lu\n", GetLastError());
+
+    return;
+}
+
+static void test_fastfail(void)
+{
+    unsigned int codes[] = {
+        FAST_FAIL_LEGACY_GS_VIOLATION,
+        FAST_FAIL_VTGUARD_CHECK_FAILURE,
+        FAST_FAIL_STACK_COOKIE_CHECK_FAILURE,
+        FAST_FAIL_CORRUPT_LIST_ENTRY,
+        FAST_FAIL_INCORRECT_STACK,
+        FAST_FAIL_INVALID_ARG,
+        FAST_FAIL_GS_COOKIE_INIT,
+        FAST_FAIL_FATAL_APP_EXIT,
+        FAST_FAIL_INVALID_FAST_FAIL_CODE,
+        0xdeadbeefUL,
+    };
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(codes); i++)
+    {
+        winetest_push_context("__fastfail(%#x)", codes[i]);
+        subtest_fastfail(codes[i]);
+        winetest_pop_context();
+    }
+}
+
 static DWORD breakpoint_exceptions;
 
 static LONG CALLBACK breakpoint_handler(EXCEPTION_POINTERS *ExceptionInfo)
@@ -8686,6 +8775,7 @@ static void test_user_apc(void)
     NTSTATUS status;
     CONTEXT context;
     LONG pass;
+    int ret;
 
     if (!pNtQueueApcThread)
     {
@@ -8695,13 +8785,50 @@ static void test_user_apc(void)
 
     pass = 0;
     InterlockedIncrement(&pass);
-    RtlCaptureContext(&context);
+#ifdef __i386__
+    {
+        /* RtlCaptureContext puts the return address of the caller's stack
+         * frame into %eip, so we need a thunk to get it to return here */
+        static const BYTE code[] =
+        {
+            0x55,               /* pushl %ebp */
+            0x89, 0xe5,         /* movl %esp, %ebp */
+            0xff, 0x75, 0x0c,   /* pushl 0xc(%ebp) */
+            0xff, 0x55, 0x08,   /* call *0x8(%ebp) */
+            0xc9,               /* leave */
+            0xc3,               /* ret */
+        };
+        int (__cdecl *func)(void *capture, CONTEXT *context) = code_mem;
+
+        memcpy(code_mem, code, sizeof(code));
+        ret = func(RtlCaptureContext, &context);
+        /* work around broken RtlCaptureContext on Windows < 7 which doesn't set
+         * ContextFlags */
+        context.ContextFlags = CONTEXT_FULL;
+    }
+#else
+    {
+        int (WINAPI *func)(CONTEXT *context) = (void *)RtlCaptureContext;
+
+        ret = func(&context);
+    }
+#endif
     InterlockedIncrement(&pass);
 
     if (pass == 2)
     {
         /* Try to make sure context data is far enough below context.Esp. */
         CONTEXT c[4];
+
+#ifdef __i386__
+        context.Eax = 0xabacab;
+#elif defined(__x86_64__)
+        context.Rax = 0xabacab;
+#elif defined(__arm__)
+        context.R0 = 0xabacab;
+#elif defined(__aarch64__)
+        context.X0 = 0xabacab;
+#endif
 
         c[0] = context;
 
@@ -8715,10 +8842,10 @@ static void test_user_apc(void)
         ok(!status, "Got unexpected status %#lx.\n", status);
         status = NtContinue(&c[0], TRUE );
 
-        /* Broken before Win7, in that case NtContinue returns here instead of restoring context after calling APC. */
-        ok(broken(TRUE), "Should not get here, status %#lx.\n", status);
+        ok(0, "Should not get here, status %#lx.\n", status);
         return;
     }
+    ok(ret == 0xabacab, "Got return value %#x.\n", ret);
     ok(pass == 3, "Got unexpected pass %ld.\n", pass);
     ok(test_apc_called, "Test user APC was not called.\n");
 }
@@ -10664,6 +10791,13 @@ START_TEST(exception)
     if (my_argc >= 4)
     {
         void *addr;
+
+        if (strcmp(my_argv[2], "fastfail") == 0)
+        {
+            __fastfail(strtoul(my_argv[3], NULL, 0));
+            return;
+        }
+
         sscanf( my_argv[3], "%p", &addr );
 
         if (addr != &test_stage)
@@ -10811,6 +10945,7 @@ START_TEST(exception)
     test_thread_context();
     test_outputdebugstring(1, FALSE);
     test_ripevent(1);
+    test_fastfail();
     test_breakpoint(1);
     test_closehandle(0, (HANDLE)0xdeadbeef);
     /* Call of Duty WWII writes to BeingDebugged then closes an invalid handle,

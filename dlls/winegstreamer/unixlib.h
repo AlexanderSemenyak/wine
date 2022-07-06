@@ -68,6 +68,7 @@ struct wg_format
             } format;
             int32_t width, height;
             uint32_t fps_n, fps_d;
+            RECT padding;
         } video;
         struct
         {
@@ -127,6 +128,7 @@ struct wg_sample
     /* timestamp and duration are in 100-nanosecond units. */
     UINT64 pts;
     UINT64 duration;
+    LONG refcount; /* unix refcount */
     UINT32 flags;
     UINT32 max_size;
     UINT32 size;

@@ -36,27 +36,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
-static DWORD process_layout = ~0u;
-
-
-/***********************************************************************
- *           get_user_handle_ptr
- */
-void *get_user_handle_ptr( HANDLE handle, unsigned int type )
-{
-    return (void *)NtUserCallTwoParam( HandleToUlong(handle), type, NtUserGetHandlePtr );
-}
-
-
-/***********************************************************************
- *           release_user_handle_ptr
- */
-void release_user_handle_ptr( void *ptr )
-{
-    assert( ptr && ptr != OBJ_OTHER_PROCESS );
-    USER_Unlock();
-}
-
 
 /*******************************************************************
  *           list_window_children
@@ -151,13 +130,19 @@ BOOL is_desktop_window( HWND hwnd )
  */
 WND *WIN_GetPtr( HWND hwnd )
 {
-    WND *ptr;
-
-    if ((ptr = get_user_handle_ptr( hwnd, NTUSER_OBJ_WINDOW )) == WND_OTHER_PROCESS)
-    {
-        if (is_desktop_window( hwnd )) ptr = WND_DESKTOP;
-    }
+    WND *ptr = (void *)NtUserCallTwoParam( HandleToUlong(hwnd), NTUSER_OBJ_WINDOW, NtUserGetHandlePtr );
+    if (ptr == WND_OTHER_PROCESS && is_desktop_window( hwnd )) ptr = WND_DESKTOP;
     return ptr;
+}
+
+
+/***********************************************************************
+ *           WIN_ReleasePtr
+ */
+void WIN_ReleasePtr( WND *ptr )
+{
+    assert( ptr && ptr != OBJ_OTHER_PROCESS );
+    NtUserCallOneParam( 1, NtUserLock );
 }
 
 
@@ -458,7 +443,7 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
      WS_MINIMIZEBOX | \
      WS_MAXIMIZEBOX))
 
-    if(style & ~DUMPED_STYLES) TRACE(" %08x", style & ~DUMPED_STYLES);
+    if(style & ~DUMPED_STYLES) TRACE(" %08lx", style & ~DUMPED_STYLES);
     TRACE("\n");
 #undef DUMPED_STYLES
 
@@ -510,7 +495,7 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
      WS_EX_COMPOSITED |\
      WS_EX_NOACTIVATE))
 
-    if(exstyle & ~DUMPED_EX_STYLES) TRACE(" %08x", exstyle & ~DUMPED_EX_STYLES);
+    if(exstyle & ~DUMPED_EX_STYLES) TRACE(" %08lx", exstyle & ~DUMPED_EX_STYLES);
     TRACE("\n");
 #undef DUMPED_EX_STYLES
 }
@@ -536,7 +521,7 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
 
     if (!get_class_info( module, className, &info, &class, FALSE )) return FALSE;
 
-    TRACE("%s %s%s%s ex=%08x style=%08x %d,%d %dx%d parent=%p menu=%p inst=%p params=%p\n",
+    TRACE("%s %s%s%s ex=%08lx style=%08lx %d,%d %dx%d parent=%p menu=%p inst=%p params=%p\n",
           unicode ? debugstr_w(cs->lpszName) : debugstr_a((LPCSTR)cs->lpszName),
           debugstr_w(className), class.Buffer != className ? "->" : "",
           class.Buffer != className ? debugstr_wn(class.Buffer, class.Length / sizeof(WCHAR)) : "",
@@ -624,15 +609,6 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
             if (is_default_coord( cs->cx ) || !cs->cx) cs->cx = pos[1].x;
             if (is_default_coord( cs->cy ) || !cs->cy) cs->cy = pos[1].y;
         }
-    }
-
-    /* FIXME: move to win32u */
-    if (!cs->hwndParent && className != (const WCHAR *)DESKTOP_CLASS_ATOM &&
-        (IS_INTRESOURCE(className) || wcsicmp( className, L"Message" )))
-    {
-        DWORD layout;
-        GetProcessDefaultLayout( &layout );
-        if (layout & LAYOUT_RTL) cs->dwExStyle |= WS_EX_LAYOUTRTL;
     }
 
     menu = cs->hMenu;
@@ -1206,20 +1182,6 @@ BOOL WINAPI IsWindowVisible( HWND hwnd )
 }
 
 
-/***********************************************************************
- *           WIN_IsWindowDrawable
- *
- * hwnd is drawable when it is visible, all parents are not
- * minimized, and it is itself not minimized unless we are
- * trying to draw its default class icon.
- */
-BOOL WIN_IsWindowDrawable( HWND hwnd, BOOL icon )
-{
-    /* FIXME: move callers to win32u */
-    return NtUserCallHwndParam( hwnd, icon, NtUserIsWindowDrawable );
-}
-
-
 /*******************************************************************
  *		GetTopWindow (USER32.@)
  */
@@ -1475,63 +1437,16 @@ DWORD WINAPI GetWindowContextHelpId( HWND hwnd )
  */
 BOOL WINAPI SetWindowContextHelpId( HWND hwnd, DWORD id )
 {
-    WND *wnd = WIN_GetPtr( hwnd );
-    if (!wnd || wnd == WND_DESKTOP) return FALSE;
-    if (wnd == WND_OTHER_PROCESS)
-    {
-        if (IsWindow( hwnd )) FIXME( "not supported on other process window %p\n", hwnd );
-        return FALSE;
-    }
-    wnd->helpContext = id;
-    WIN_ReleasePtr( wnd );
-    return TRUE;
+    return NtUserSetWindowContextHelpId( hwnd, id );
 }
 
 
 /*******************************************************************
  *		DragDetect (USER32.@)
  */
-BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
+BOOL WINAPI DragDetect( HWND hwnd, POINT pt )
 {
-    MSG msg;
-    RECT rect;
-    WORD wDragWidth, wDragHeight;
-
-    TRACE( "%p,%s\n", hWnd, wine_dbgstr_point( &pt ) );
-
-    if (!(NtUserGetKeyState( VK_LBUTTON ) & 0x8000))
-        return FALSE;
-
-    wDragWidth = GetSystemMetrics(SM_CXDRAG);
-    wDragHeight= GetSystemMetrics(SM_CYDRAG);
-    SetRect(&rect, pt.x - wDragWidth, pt.y - wDragHeight, pt.x + wDragWidth, pt.y + wDragHeight);
-
-    NtUserSetCapture( hWnd );
-
-    while(1)
-    {
-        while (PeekMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE ))
-        {
-            if( msg.message == WM_LBUTTONUP )
-            {
-                ReleaseCapture();
-                return FALSE;
-            }
-            if( msg.message == WM_MOUSEMOVE )
-            {
-                POINT tmp;
-                tmp.x = (short)LOWORD(msg.lParam);
-                tmp.y = (short)HIWORD(msg.lParam);
-                if( !PtInRect( &rect, tmp ))
-                {
-                    ReleaseCapture();
-                    return TRUE;
-                }
-            }
-        }
-        WaitMessage();
-    }
-    return FALSE;
+    return NtUserDragDetect( hwnd, pt.x, pt.y );
 }
 
 /******************************************************************************
@@ -1657,7 +1572,8 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
         SetLastError( ERROR_NOACCESS );
         return FALSE;
     }
-    if (process_layout == ~0u)
+    *layout = NtUserGetProcessDefaultLayout();
+    if (*layout == ~0u)
     {
         WCHAR *str, buffer[MAX_PATH];
         DWORD i, version_layout = 0;
@@ -1687,9 +1603,8 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
 
     done:
         HeapFree( GetProcessHeap(), 0, data );
-        process_layout = version_layout;
+        NtUserSetProcessDefaultLayout( *layout = version_layout );
     }
-    *layout = process_layout;
     return TRUE;
 }
 
@@ -1701,8 +1616,7 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
  */
 BOOL WINAPI SetProcessDefaultLayout( DWORD layout )
 {
-    process_layout = layout;
-    return TRUE;
+    return NtUserSetProcessDefaultLayout( layout );
 }
 
 #ifdef _WIN64
@@ -1753,7 +1667,7 @@ LONG_PTR WINAPI SetWindowLongPtrA( HWND hwnd, INT offset, LONG_PTR newval )
  */
 BOOL WINAPI RegisterTouchWindow(HWND hwnd, ULONG flags)
 {
-    FIXME("(%p %08x): stub\n", hwnd, flags);
+    FIXME("(%p %08lx): stub\n", hwnd, flags);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -1820,7 +1734,7 @@ BOOL WINAPI GetWindowDisplayAffinity(HWND hwnd, DWORD *affinity)
  */
 BOOL WINAPI SetWindowDisplayAffinity(HWND hwnd, DWORD affinity)
 {
-    FIXME("(%p, %u): stub\n", hwnd, affinity);
+    FIXME("(%p, %lu): stub\n", hwnd, affinity);
 
     if (!hwnd)
     {
@@ -1840,51 +1754,4 @@ BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, void *data)
     FIXME("(%p, %p): stub\n", hwnd, data);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
-}
-
-/***********************************************************************
- *              InternalGetWindowIcon   (USER32.@)
- */
-HICON WINAPI InternalGetWindowIcon( HWND hwnd, UINT type )
-{
-    WND *win = WIN_GetPtr( hwnd );
-    HICON ret;
-
-    TRACE( "hwnd %p, type %#x\n", hwnd, type );
-
-    if (!win)
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return 0;
-    }
-    if (win == WND_OTHER_PROCESS || win == WND_DESKTOP)
-    {
-        if (IsWindow( hwnd )) FIXME( "not supported on other process window %p\n", hwnd );
-        return 0;
-    }
-
-    switch (type)
-    {
-        case ICON_BIG:
-            ret = win->hIcon;
-            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICON );
-            break;
-
-        case ICON_SMALL:
-        case ICON_SMALL2:
-            ret = win->hIconSmall ? win->hIconSmall : win->hIconSmall2;
-            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICONSM );
-            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICON );
-            break;
-
-        default:
-            SetLastError( ERROR_INVALID_PARAMETER );
-            WIN_ReleasePtr( win );
-            return 0;
-    }
-
-    if (!ret) ret = LoadIconW( 0, (const WCHAR *)IDI_APPLICATION );
-
-    WIN_ReleasePtr( win );
-    return CopyIcon( ret );
 }

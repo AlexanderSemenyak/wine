@@ -1718,7 +1718,6 @@ struct process_info
     VARARG(class,unicode_str);         /* class name */
 @REPLY
     obj_handle_t hkey;         /* handle to the created key */
-    int          created;      /* has it been newly created? */
 @END
 
 /* Open a registry key */
@@ -1834,6 +1833,13 @@ struct process_info
     obj_handle_t event;        /* event to set */
     int          subtree;      /* should we watch the whole subtree? */
     unsigned int filter;       /* things to watch */
+@END
+
+
+/* Rename a registry key */
+@REQ(rename_key)
+    obj_handle_t hkey;         /* handle to the key to be renamed */
+    VARARG(name,unicode_str);  /* new name */
 @END
 
 
