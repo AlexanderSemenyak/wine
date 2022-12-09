@@ -164,7 +164,7 @@ msgstr "Комментарии:"
 
 #: dlls/appwiz.cpl/appwiz.rc:100
 msgid "Wine Gecko Installer"
-msgstr "Установка Wine Gecko"
+msgstr "Установка браузера"
 
 #: dlls/appwiz.cpl/appwiz.rc:103
 msgid ""
@@ -176,8 +176,8 @@ msgid ""
 "href=\"https://wiki.winehq.org/Gecko\">https://wiki.winehq.org/Gecko</a> for "
 "details."
 msgstr ""
-"Wine не может найти пакет Gecko, который необходим для корректной работы "
-"приложений с поддержкой HTML. Wine может автоматически загрузить и "
+"ИУС Разработка не может найти пакет браузера, который необходим для корректной работы "
+"приложений с поддержкой HTML. ИУС Разработка нe может автоматически загрузить и "
 "установить его.\n"
 "\n"
 "Примечание: рекомендуется использовать пакет, предоставляемый вашим "
@@ -233,7 +233,7 @@ msgstr "Отмена"
 
 #: dlls/appwiz.cpl/appwiz.rc:115
 msgid "Wine Mono Installer"
-msgstr "Установка Wine Mono"
+msgstr "Установка Моно"
 
 #: dlls/appwiz.cpl/appwiz.rc:118
 msgid ""
@@ -245,8 +245,8 @@ msgid ""
 "href=\"https://wiki.winehq.org/Mono\">https://wiki.winehq.org/Mono</a> for "
 "details."
 msgstr ""
-"Wine не может найти пакет wine-mono, который необходим для корректной "
-"работы .NET приложений. Wine может автоматически загрузить и установить "
+"ИУС Разработка не может найти пакет Моно, который необходим для корректной "
+"работы .NET приложений. ИУС Разработка может автоматически загрузить и установить "
 "его.\n"
 "\n"
 "Примечание: рекомендуется использовать пакет, предоставляемый вашим "
@@ -377,7 +377,7 @@ msgstr "аудио"
 
 #: dlls/avifil32/avifil32.rc:36
 msgid "Wine AVI-default-filehandler"
-msgstr "Обработчик по умолчанию avi-файлов в Wine"
+msgstr "Обработчик по умолчанию avi-файлов"
 
 #: dlls/avifil32/avifil32.rc:37
 msgid "uncompressed"
@@ -2421,7 +2421,7 @@ msgid ""
 "Wine can automatically select the certificate store, or you can specify a "
 "location for the certificates."
 msgstr ""
-"Wine может автоматически выбрать хранилище сертификатов, либо вы можете сами "
+"ИУС Разработка может автоматически выбрать хранилище сертификатов, либо вы можете сами "
 "указать его."
 
 #: dlls/cryptui/cryptui.rc:318
@@ -3695,7 +3695,7 @@ msgstr "Параметры Интернета"
 
 #: dlls/inetcpl.cpl/inetcpl.rc:32
 msgid "Configure Wine Internet Browser and related settings"
-msgstr "Настройка браузера Wine и связанных параметров"
+msgstr "Настройка браузера и связанных параметров"
 
 #: dlls/inetcpl.cpl/inetcpl.rc:33
 msgid "Security settings for zone: "
@@ -4098,12 +4098,12 @@ msgstr "Свойство не может одновременно иметь м�
 
 #: include/wine/wine_common_ver.rc:133
 msgid "Wine kernel DLL"
-msgstr "Библиотека ядра Wine"
+msgstr "Библиотека ядра"
 
 #: include/wine/wine_common_ver.rc:138 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
 msgid "Wine"
-msgstr "Wine"
+msgstr "Ядро"
 
 #: dlls/kernelbase/kernelbase.rc:29
 msgid "Western Europe and United States"
@@ -8709,14 +8709,14 @@ msgstr ""
 
 #: dlls/msrle32/msrle32.rc:31
 msgid "Wine MS-RLE video codec"
-msgstr "Видео кодек Wine MS-RLE"
+msgstr "Видео кодек MS-RLE"
 
 #: dlls/msrle32/msrle32.rc:32
 msgid ""
 "Wine MS-RLE video codec\n"
 "Copyright 2002 by Michael Guennewig"
 msgstr ""
-"Видео кодек Wine MS-RLE\n"
+"Видео кодек MS-RLE\n"
 "Copyright 2002 by Michael Guennewig"
 
 #: dlls/msvfw32/msvfw32.rc:33
@@ -8757,7 +8757,7 @@ msgstr "Кадры целиком (Без компрессии)"
 
 #: dlls/msvidc32/msvidc32.rc:29
 msgid "Wine Video 1 video codec"
-msgstr "Видео кодек Wine Video 1"
+msgstr "Видео кодек Video 1"
 
 #: dlls/oleacc/oleacc.rc:31
 msgid "unknown object"
@@ -9909,7 +9909,7 @@ msgstr "Прокрутка вправо"
 
 #: dlls/shdoclc/shdoclc.rc:28
 msgid "Wine Internet Explorer"
-msgstr "Wine Internet Explorer"
+msgstr "Браузер"
 
 #: dlls/shdoclc/shdoclc.rc:33
 msgid "&w&bPage &p"
@@ -10049,15 +10049,15 @@ msgstr "О %s"
 
 #: dlls/shell32/shell32.rc:321
 msgid "Wine &license"
-msgstr "&Лицензия Wine"
+msgstr "&Лицензия ядра"
 
 #: dlls/shell32/shell32.rc:326
 msgid "Running on %s"
-msgstr "Версия Wine %s"
+msgstr "Версия ядра %s"
 
 #: dlls/shell32/shell32.rc:327
 msgid "Wine was brought to you by:"
-msgstr "Разработчики Wine:"
+msgstr "Разработчики ядра:"
 
 #: dlls/shell32/shell32.rc:332
 msgid "Run"
@@ -10068,7 +10068,7 @@ msgid ""
 "Type the name of a program, folder, document, or Internet resource, and Wine "
 "will open it for you."
 msgstr ""
-"Введите имя программы, папки, документа или ресурс Интернета, и Wine откроет "
+"Введите имя программы, папки, документа или ресурс Интернета, и ИУС Разработка откроет "
 "их."
 
 #: dlls/shell32/shell32.rc:337
@@ -10195,7 +10195,7 @@ msgstr "Выключить питание"
 
 #: dlls/shell32/shell32.rc:190
 msgid "Do you want to shutdown your Wine session?"
-msgstr "Закончить работу с Wine?"
+msgstr "Закончить работу с ИУС Разработка?"
 
 #: dlls/shell32/shell32.rc:201 programs/progman/progman.rc:83
 msgid "Programs"
@@ -10398,7 +10398,7 @@ msgstr ""
 
 #: dlls/shell32/shell32.rc:238
 msgid "Wine Control Panel"
-msgstr "Панель Управления Wine"
+msgstr "Панель Управления ИУС Разработка"
 
 #: dlls/shell32/shell32.rc:193
 msgid "Unable to display Run dialog box (internal error)"
@@ -10468,22 +10468,22 @@ msgid ""
 "along with Wine; if not, write to the Free Software Foundation, Inc., 51 "
 "Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 msgstr ""
-"Wine является свободным программным обеспечением; вы можете распространять "
-"его и/или модифицировать согласно условиям лицензии GNU LGPL версии 2.1 (или "
-"более поздней по вашему выбору), опубликованной Free Software Foundation.\n"
+"Ядро ИУС Разработка является собственностью ООО ОНИТ "
+" "
 "\n"
-"Пакет Wine распространяется в надежде на то, что он окажется полезен вам, но "
-"без КАКИХ-ЛИБО ГАРАНТИЙ; в том числе без неявных ГАРАНТИЙ ТОВАРНОГО "
-"СОСТОЯНИЯ и ПРИГОДНОСТИ ДЛЯ КОНКРЕТНЫХ ЦЕЛЕЙ. За подробной информацией "
-"обратитесь к лицензии GNU LGPL.\n"
 "\n"
-"Вы должны были получить копию лицензии GNU LGPL вместе с Wine; если это не "
-"так, обратитесь в Free Software Foundation, Inc., 51 Franklin St, Fifth "
-"Floor, Boston, MA 02110-1301, USA."
+" "
+" "
+" "
+"\n"
+"\n"
+" "
+" "
+" "
 
 #: dlls/shell32/shell32.rc:254
 msgid "Wine License"
-msgstr "Лицензия Wine"
+msgstr "Лицензия ядра"
 
 #: dlls/shell32/shell32.rc:156
 msgid "Trash"
@@ -12833,7 +12833,7 @@ msgstr "&Закрыть\tAlt+F4"
 
 #: dlls/user32/user32.rc:38
 msgid "&About Wine"
-msgstr "&О Wine"
+msgstr "&О Ядре"
 
 #: dlls/user32/user32.rc:49
 msgid "&Close\tCtrl+F4"
@@ -13741,7 +13741,7 @@ msgstr ""
 
 #: dlls/winmm/winmm.rc:136
 msgid "Wine Sound Mapper"
-msgstr "Wine Sound Mapper"
+msgstr "Sound Mapper"
 
 #: dlls/winmm/winmm.rc:137
 msgid "Volume"
@@ -14433,7 +14433,7 @@ msgstr ""
 "равенства не должно быть пробелов, имя переменной не может содержать\n"
 "пробелы.\n"
 "\n"
-"В Wine переменные окружения основной операционной системы включены в\n"
+"В ИУС Разработка переменные окружения основной операционной системы включены в\n"
 "окружение Win32, поэтому будет доступно несколько больше переменных, чем в\n"
 "обычной Win32. Стоит отметить, что невозможно изменить окружение\n"
 "операционной системы из cmd.\n"
@@ -14539,7 +14539,7 @@ msgstr ""
 "VERIFY OFF\tсбросить флаг.\n"
 "VERIFY\t\tВыводит текущее состояние: ON или OFF.\n"
 "\n"
-"Этот флаг не используется в Wine.\n"
+"Этот флаг не используется в ядре ИУС Разработка.\n"
 
 #: programs/cmd/cmd.rc:256
 msgid "VER displays the version of cmd you are running.\n"
@@ -14883,7 +14883,7 @@ msgstr "Нажмите любую клавишу для продолжения..
 
 #: programs/cmd/cmd.rc:396
 msgid "Wine Command Prompt"
-msgstr "Приглашение командной строки Wine"
+msgstr "Приглашение командной строки ИУС Разработка"
 
 #: programs/cmd/cmd.rc:397
 msgid "Microsoft Windows %1!S!\n"
@@ -15105,7 +15105,7 @@ msgstr "Использование: dxdiag [/whql:off | /whql:on] [/t файл |
 
 #: programs/explorer/explorer.rc:32
 msgid "Wine Explorer"
-msgstr "Проводник Wine"
+msgstr "Проводник ИУС Разработка"
 
 #: programs/explorer/explorer.rc:34
 msgid "Start"
@@ -15863,7 +15863,7 @@ msgid ""
 "They have no effect on Wine performance."
 msgstr ""
 "Эти настройки изменяют только значения реестра и\n"
-"не оказывают влияния на производительность Wine."
+"не оказывают влияния на производительность Ядра ИУС Разработка."
 
 #: programs/oleview/oleview.rc:180
 msgid "Default Interface Viewer"
@@ -15927,7 +15927,7 @@ msgstr "Изменить общесистемные настройки Distribut
 
 #: programs/oleview/oleview.rc:108
 msgid "Run the Wine registry editor"
-msgstr "Запустить Редактор реестра Wine"
+msgstr "Запустить Редактор реестра ИУС Разработка"
 
 #: programs/oleview/oleview.rc:109
 msgid "Quit the application. Prompts to save changes"
@@ -17274,7 +17274,7 @@ msgid ""
 "Provides DLL registration services.\n"
 "\n"
 msgstr ""
-"Утилита регистрации DLL в Wine\n"
+"Утилита регистрации DLL в ИУС Разработка\n"
 "\n"
 "Используется для регистрации DLL.\n"
 "\n"
@@ -17407,7 +17407,7 @@ msgstr ""
 "/unix          Использовать Unix-имя файла и запустить как Windows\n"
 "               Explorer.\n"
 "/exec          Выполнить указанный файл (для внутреннего использования в "
-"Wine).\n"
+"ядре ИУС Разработка).\n"
 "/ProgIDOpen    Открывает документ с помощью указанного progID.\n"
 "/?             Показать эту справку и выйти.\n"
 
@@ -18288,7 +18288,7 @@ msgstr "Задача"
 
 #: programs/uninstaller/uninstaller.rc:29
 msgid "Wine Application Uninstaller"
-msgstr "Удаление приложений Wine"
+msgstr "Удаление приложений ИУС Разработка"
 
 #: programs/uninstaller/uninstaller.rc:30
 msgid ""
@@ -18322,9 +18322,9 @@ msgid ""
 "Uninstall applications from the current Wine prefix.\n"
 "\n"
 msgstr ""
-"Программа удаления приложений Wine\n"
+"Программа удаления приложений ИУС Разработка\n"
 "\n"
-"Удаляет приложения из текущего префикса Wine.\n"
+"Удаляет приложения из текущего префикса ИУС Разработка.\n"
 "\n"
 
 #: programs/uninstaller/uninstaller.rc:43
@@ -18398,7 +18398,7 @@ msgstr ""
 
 #: programs/wineboot/wineboot.rc:46
 msgid "The Wine configuration in %s is being updated, please wait..."
-msgstr "Выполняется обновление конфигурации Wine %s. Пожалуйста, подождите..."
+msgstr "Выполняется обновление конфигурации ядра ИУС Разработка %s. Пожалуйста, подождите..."
 
 #: programs/winecfg/winecfg.rc:140
 msgid ""
@@ -18434,7 +18434,7 @@ msgid ""
 "linked to the Libraries and Graphics tabs to allow you to change system-wide "
 "or per-application settings in those tabs as well."
 msgstr ""
-"Wine может имитировать различные версии Windows для каждого приложения "
+"ИУС Разработка может имитировать различные версии Windows для каждого приложения "
 "отдельно. Эта вкладка связана со вкладками Библиотеки и Графика, что "
 "позволяет изменять настройки в этих вкладках как для определённого "
 "приложения, так и глобально."
@@ -18465,7 +18465,7 @@ msgstr "Разрешить менеджеру окон &декорировать
 
 #: programs/winecfg/winecfg.rc:171
 msgid "Allow the &window manager to control the windows"
-msgstr "Разрешить менеджеру окон управлять &окнами Wine"
+msgstr "Разрешить менеджеру окон управлять &окнами Ядра ИУС Разработка"
 
 #: programs/winecfg/winecfg.rc:172
 msgid "&Emulate a virtual desktop"
@@ -18494,7 +18494,7 @@ msgid ""
 "application)."
 msgstr ""
 "Здесь указывается, какую динамически подключаемую библиотеку (DLL) "
-"использовать: встроенную в Wine или стороннюю (из Windows)."
+"использовать: встроенную в Ядро или стороннюю (из Windows)."
 
 #: programs/winecfg/winecfg.rc:193
 msgid "&New override for library:"
@@ -18522,19 +18522,19 @@ msgstr "Порядок загрузки"
 
 #: programs/winecfg/winecfg.rc:208
 msgid "&Builtin (Wine)"
-msgstr "&Встроенная (Wine)"
+msgstr "&Встроенная (Ядро)"
 
 #: programs/winecfg/winecfg.rc:209
 msgid "&Native (Windows)"
-msgstr "&Сторонняя (Windows)"
+msgstr "&Встроенная (Альтернативная)"
 
 #: programs/winecfg/winecfg.rc:210
 msgid "Buil&tin then Native"
-msgstr "Вс&троенная, затем сторонняя"
+msgstr "Вс&троенная, затем альтернативная"
 
 #: programs/winecfg/winecfg.rc:211
 msgid "Nati&ve then Builtin"
-msgstr "Сто&ронняя, затем встроенная"
+msgstr "Альтернативная, затем встроенная"
 
 #: programs/winecfg/winecfg.rc:219
 msgid "Select Drive Letter"
@@ -18694,7 +18694,7 @@ msgstr "О программе"
 
 #: programs/winecfg/winecfg.rc:43
 msgid "Wine configuration"
-msgstr "Настройка Wine"
+msgstr "Настройка Ядра"
 
 #: programs/winecfg/winecfg.rc:45
 msgid "Theme files (*.msstyles; *.theme)"
@@ -18714,7 +18714,7 @@ msgstr "Связано с"
 
 #: programs/winecfg/winecfg.rc:44
 msgid "Wine configuration for %s"
-msgstr "Настройка Wine для %s"
+msgstr "Настройка Ядра для %s"
 
 #: programs/winecfg/winecfg.rc:83
 msgid "Selected driver: %s"
@@ -18786,7 +18786,7 @@ msgstr "Установки по умолчанию"
 
 #: programs/winecfg/winecfg.rc:61
 msgid "Wine Programs (*.exe; *.exe.so)"
-msgstr "Программы Wine (*.exe; *.exe.so)"
+msgstr "Программы Ядра (*.exe; *.exe.so)"
 
 #: programs/winecfg/winecfg.rc:62
 msgid "Use global settings"
@@ -19012,9 +19012,9 @@ msgid ""
 "may want to check the <a href=\"https://appdb.winehq.org\">Application "
 "Database</a> for tips about running this application."
 msgstr ""
-"Ошибка могла быть вызвана проблемой в программе или недоработкой в Wine. Вы "
-"можете посетить <a href=\"https://appdb.winehq.org\">Application Database</"
-"a> и поискать советы о запуске этой программы."
+"Ошибка могла быть вызвана проблемой в программе или недоработкой в Ядре ИУС Разработка. Вы "
+"можете отправить сообщение на support@it-onit.ru "
+"для получения совета о разрешении возникшей проблемы."
 
 #: programs/winedbg/winedbg.rc:62
 msgid "Show &Details"
@@ -19211,7 +19211,7 @@ msgstr "Ошибка при выборе нового шрифта."
 
 #: programs/winefile/winefile.rc:96
 msgid "Wine File Manager"
-msgstr "Файловый менеджер Wine"
+msgstr "Файловый менеджер"
 
 #: programs/winefile/winefile.rc:98
 msgid "root fs"
@@ -19403,7 +19403,7 @@ msgstr "Поиск"
 
 #: programs/winhlp32/winhlp32.rc:81
 msgid "Wine Help"
-msgstr "Справка Wine"
+msgstr "Справка"
 
 #: programs/winhlp32/winhlp32.rc:86
 msgid "Error while reading the help file `%s'"
@@ -19571,7 +19571,7 @@ msgstr "&Светло-жёлтый\tCtrl+2"
 
 #: programs/wordpad/wordpad.rc:104
 msgid "&About Wine Wordpad"
-msgstr "&О Wine Wordpad"
+msgstr "&О Wordpad"
 
 #: programs/wordpad/wordpad.rc:141
 msgid "Automatic"
