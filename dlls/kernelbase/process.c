@@ -193,8 +193,12 @@ static RTL_USER_PROCESS_PARAMETERS *create_process_params( const WCHAR *filename
     if (flags & CREATE_NEW_CONSOLE) params->ConsoleHandle = CONSOLE_HANDLE_ALLOC;
     else if (!(flags & DETACHED_PROCESS))
     {
-        params->ConsoleHandle = NtCurrentTeb()->Peb->ProcessParameters->ConsoleHandle;
-        if (!params->ConsoleHandle) params->ConsoleHandle = CONSOLE_HANDLE_ALLOC;
+        if (flags & CREATE_NO_WINDOW) params->ConsoleHandle = CONSOLE_HANDLE_ALLOC_NO_WINDOW;
+        else
+        {
+            params->ConsoleHandle = NtCurrentTeb()->Peb->ProcessParameters->ConsoleHandle;
+            if (!params->ConsoleHandle) params->ConsoleHandle = CONSOLE_HANDLE_ALLOC;
+        }
     }
 
     if (startup->dwFlags & STARTF_USESTDHANDLES)
@@ -532,8 +536,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     /* Warn if unsupported features are used */
 
     if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |
-                 CREATE_DEFAULT_ERROR_MODE | CREATE_NO_WINDOW |
-                 PROFILE_USER | PROFILE_KERNEL | PROFILE_SERVER))
+                 CREATE_DEFAULT_ERROR_MODE | PROFILE_USER | PROFILE_KERNEL | PROFILE_SERVER))
         WARN( "(%s,...): ignoring some flags in %lx\n", debugstr_w(app_name), flags );
 
     if (cur_dir)
@@ -685,6 +688,26 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( const WCHAR *app_name, WCHAR *cmd_
 {
     return CreateProcessInternalW( NULL, app_name, cmd_line, process_attr, thread_attr,
                                    inherit, flags, env, cur_dir, startup_info, info, NULL );
+}
+
+
+/**********************************************************************
+ *           SetProcessInformation   (kernelbase.@)
+ */
+BOOL WINAPI SetProcessInformation( HANDLE process, PROCESS_INFORMATION_CLASS info_class, void *info, DWORD size )
+{
+    switch (info_class)
+    {
+        case ProcessMemoryPriority:
+            return set_ntstatus( NtSetInformationProcess( process, ProcessPagePriority, info, size ));
+        case ProcessPowerThrottling:
+            return set_ntstatus( NtSetInformationProcess( process, ProcessPowerThrottlingState, info, size ));
+        case ProcessLeapSecondInfo:
+            return set_ntstatus( NtSetInformationProcess( process, ProcessLeapSecondInformation, info, size ));
+        default:
+            FIXME("Unrecognized information class %d.\n", info_class);
+            return FALSE;
+    }
 }
 
 

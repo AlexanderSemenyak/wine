@@ -128,9 +128,9 @@ enum directions
 
 /* HELPER FUNCTIONS */
 
-static inline unsigned short get_table_entry(const unsigned short *table, WCHAR ch)
+static inline unsigned short get_table_entry_32( const unsigned short *table, UINT ch )
 {
-    return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
+    return table[table[table[table[ch >> 12] + ((ch >> 8) & 0x0f)] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
 }
 
 /* Convert the libwine information to the direction enum */
@@ -139,7 +139,7 @@ static void classify(LPCWSTR lpString, WORD *chartype, DWORD uCount)
     unsigned i;
 
     for (i = 0; i < uCount; ++i)
-        chartype[i] = get_table_entry( bidi_direction_table, lpString[i] );
+        chartype[i] = get_table_entry_32( bidi_direction_table, lpString[i] );
 }
 
 /* Set a run of cval values at locations all prior to, but not including */
@@ -471,7 +471,7 @@ static BOOL BIDI_Reorder( HDC hDC,               /* [in] Display DC */
             WARN("Out of memory\n");
             goto cleanup;
         }
-        psva = HeapAlloc(GetProcessHeap(),0,sizeof(SCRIPT_VISATTR) * uCount);
+        psva = HeapAlloc(GetProcessHeap(),0,sizeof(SCRIPT_VISATTR) * cMaxGlyphs);
         if (!psva)
         {
             WARN("Out of memory\n");
@@ -604,16 +604,22 @@ static BOOL BIDI_Reorder( HDC hDC,               /* [in] Display DC */
                 while (res == E_OUTOFMEMORY)
                 {
                     WORD *new_run_glyphs = HeapReAlloc(GetProcessHeap(), 0, run_glyphs, sizeof(*run_glyphs) * cMaxGlyphs * 2);
-                    if (!new_run_glyphs)
+                    SCRIPT_VISATTR *new_psva = HeapReAlloc(GetProcessHeap(), 0, psva, sizeof(*psva) * cMaxGlyphs * 2);
+                    if (!new_run_glyphs || !new_psva)
                     {
                         WARN("Out of memory\n");
                         HeapFree(GetProcessHeap(), 0, runOrder);
                         HeapFree(GetProcessHeap(), 0, visOrder);
                         HeapFree(GetProcessHeap(), 0, *lpGlyphs);
                         *lpGlyphs = NULL;
+                        if (new_run_glyphs)
+                            run_glyphs = new_run_glyphs;
+                        if (new_psva)
+                            psva = new_psva;
                         goto cleanup;
                     }
                     run_glyphs = new_run_glyphs;
+                    psva = new_psva;
                     cMaxGlyphs *= 2;
                     res = ScriptShape(hDC, &psc, lpString + done + curItem->iCharPos, cChars, cMaxGlyphs, &curItem->a, run_glyphs, pwLogClust, psva, &cOutGlyphs);
                 }
@@ -2728,44 +2734,25 @@ done:
     return FALSE;
 }
 
-static const CHARSETINFO charset_info[] = {
-    /* ANSI */
-    { ANSI_CHARSET, 1252, {{0,0,0,0},{FS_LATIN1,0}} },
-    { EASTEUROPE_CHARSET, 1250, {{0,0,0,0},{FS_LATIN2,0}} },
-    { RUSSIAN_CHARSET, 1251, {{0,0,0,0},{FS_CYRILLIC,0}} },
-    { GREEK_CHARSET, 1253, {{0,0,0,0},{FS_GREEK,0}} },
-    { TURKISH_CHARSET, 1254, {{0,0,0,0},{FS_TURKISH,0}} },
-    { HEBREW_CHARSET, 1255, {{0,0,0,0},{FS_HEBREW,0}} },
-    { ARABIC_CHARSET, 1256, {{0,0,0,0},{FS_ARABIC,0}} },
-    { BALTIC_CHARSET, 1257, {{0,0,0,0},{FS_BALTIC,0}} },
-    { VIETNAMESE_CHARSET, 1258, {{0,0,0,0},{FS_VIETNAMESE,0}} },
-    /* reserved by ANSI */
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    /* ANSI and OEM */
-    { THAI_CHARSET, 874, {{0,0,0,0},{FS_THAI,0}} },
-    { SHIFTJIS_CHARSET, 932, {{0,0,0,0},{FS_JISJAPAN,0}} },
-    { GB2312_CHARSET, 936, {{0,0,0,0},{FS_CHINESESIMP,0}} },
-    { HANGEUL_CHARSET, 949, {{0,0,0,0},{FS_WANSUNG,0}} },
-    { CHINESEBIG5_CHARSET, 950, {{0,0,0,0},{FS_CHINESETRAD,0}} },
-    { JOHAB_CHARSET, 1361, {{0,0,0,0},{FS_JOHAB,0}} },
-    /* reserved for alternate ANSI and OEM */
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    /* reserved for system */
-    { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-    { SYMBOL_CHARSET, CP_SYMBOL, {{0,0,0,0},{FS_SYMBOL,0}} }
+static const CHARSETINFO charset_info[] =
+{
+    { ANSI_CHARSET,        1252,      { {0}, { FS_LATIN1 }}},
+    { EASTEUROPE_CHARSET,  1250,      { {0}, { FS_LATIN2 }}},
+    { RUSSIAN_CHARSET,     1251,      { {0}, { FS_CYRILLIC }}},
+    { GREEK_CHARSET,       1253,      { {0}, { FS_GREEK }}},
+    { TURKISH_CHARSET,     1254,      { {0}, { FS_TURKISH }}},
+    { HEBREW_CHARSET,      1255,      { {0}, { FS_HEBREW }}},
+    { ARABIC_CHARSET,      1256,      { {0}, { FS_ARABIC }}},
+    { BALTIC_CHARSET,      1257,      { {0}, { FS_BALTIC }}},
+    { VIETNAMESE_CHARSET,  1258,      { {0}, { FS_VIETNAMESE }}},
+    { THAI_CHARSET,        874,       { {0}, { FS_THAI }}},
+    { SHIFTJIS_CHARSET,    932,       { {0}, { FS_JISJAPAN }}},
+    { GB2312_CHARSET,      936,       { {0}, { FS_CHINESESIMP }}},
+    { HANGEUL_CHARSET,     949,       { {0}, { FS_WANSUNG }}},
+    { CHINESEBIG5_CHARSET, 950,       { {0}, { FS_CHINESETRAD }}},
+    { JOHAB_CHARSET,       1361,      { {0}, { FS_JOHAB }}},
+    { 254,                 CP_UTF8,   { {0}, { 0x04000000 }}},
+    { SYMBOL_CHARSET,      CP_SYMBOL, { {0}, { FS_SYMBOL }}}
 };
 
 /***********************************************************************
@@ -2785,27 +2772,26 @@ static const CHARSETINFO charset_info[] = {
  */
 BOOL WINAPI TranslateCharsetInfo( DWORD *src, CHARSETINFO *cs, DWORD flags )
 {
-    int index = 0;
+    unsigned int i;
 
     switch (flags)
     {
     case TCI_SRCFONTSIG:
-        while (index < ARRAY_SIZE(charset_info) && !(*src>>index & 0x0001)) index++;
-        break;
+        for (i = 0; i < ARRAY_SIZE(charset_info); i++)
+            if (charset_info[i].fs.fsCsb[0] & src[0]) goto found;
+        return FALSE;
     case TCI_SRCCODEPAGE:
-        while (index < ARRAY_SIZE(charset_info) && PtrToUlong(src) != charset_info[index].ciACP)
-            index++;
-        break;
+        for (i = 0; i < ARRAY_SIZE(charset_info); i++)
+            if (PtrToUlong(src) == charset_info[i].ciACP) goto found;
+        return FALSE;
     case TCI_SRCCHARSET:
-        while (index < ARRAY_SIZE(charset_info) &&
-               PtrToUlong(src) != charset_info[index].ciCharset)
-            index++;
-        break;
+        for (i = 0; i < ARRAY_SIZE(charset_info); i++)
+            if (PtrToUlong(src) == charset_info[i].ciCharset) goto found;
+        return FALSE;
     default:
         return FALSE;
     }
-
-    if (index >= ARRAY_SIZE(charset_info) || charset_info[index].ciCharset == DEFAULT_CHARSET) return FALSE;
-    *cs = charset_info[index];
+found:
+    *cs = charset_info[i];
     return TRUE;
 }

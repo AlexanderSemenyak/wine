@@ -18,6 +18,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 #include "windef.h"
@@ -34,7 +35,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 
 static HCRYPTPROV hDefProv;
 HINSTANCE hInstance;
-unixlib_handle_t crypt32_handle = 0;
 
 static CRITICAL_SECTION prov_param_cs;
 static CRITICAL_SECTION_DEBUG prov_param_cs_debug =
@@ -55,8 +55,7 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, PVOID pvReserved)
             DisableThreadLibraryCalls(hInst);
             init_empty_store();
             crypt_oid_init();
-            if (NtQueryVirtualMemory( GetCurrentProcess(), hInst, MemoryWineUnixFuncs,
-                                      &crypt32_handle, sizeof(crypt32_handle), NULL ))
+            if (__wine_init_unix_call())
                 return FALSE;
             CRYPT32_CALL( process_attach, NULL );
             break;
@@ -136,17 +135,17 @@ HLRUCACHE WINAPI I_CryptFreeLruCache(HLRUCACHE h, DWORD unk0, DWORD unk1)
 
 LPVOID WINAPI CryptMemAlloc(ULONG cbSize)
 {
-    return HeapAlloc(GetProcessHeap(), 0, cbSize);
+    return malloc(cbSize);
 }
 
 LPVOID WINAPI CryptMemRealloc(LPVOID pv, ULONG cbSize)
 {
-    return HeapReAlloc(GetProcessHeap(), 0, pv, cbSize);
+    return realloc(pv, cbSize);
 }
 
 VOID WINAPI CryptMemFree(LPVOID pv)
 {
-    HeapFree(GetProcessHeap(), 0, pv);
+    free(pv);
 }
 
 DWORD WINAPI I_CryptAllocTls(void)

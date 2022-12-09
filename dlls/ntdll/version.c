@@ -264,7 +264,7 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &nameW, L"Machine\\Software\\Microsoft\\Windows NT\\CurrentVersion" );
+    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Windows NT\\CurrentVersion" );
 
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) return FALSE;
 
@@ -311,7 +311,7 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
 
         /* get service pack version */
 
-        RtlInitUnicodeString( &nameW, L"Machine\\System\\CurrentControlSet\\Control\\Windows" );
+        RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Windows" );
         if (!NtOpenKey( &hkey2, KEY_ALL_ACCESS, &attr ))
         {
             RtlInitUnicodeString( &valueW, L"CSDVersion" );
@@ -329,7 +329,7 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
 
         /* get product type */
 
-        RtlInitUnicodeString( &nameW, L"Machine\\System\\CurrentControlSet\\Control\\ProductOptions" );
+        RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\ProductOptions" );
         if (!NtOpenKey( &hkey2, KEY_ALL_ACCESS, &attr ))
         {
             RtlInitUnicodeString( &valueW, L"ProductType" );
@@ -373,7 +373,7 @@ static BOOL get_win9x_registry_version( RTL_OSVERSIONINFOEXW *version )
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &nameW, L"Machine\\Software\\Microsoft\\Windows\\CurrentVersion" );
+    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Windows\\CurrentVersion" );
 
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) return FALSE;
 
@@ -525,7 +525,7 @@ done:
     NtCurrentTeb()->Peb->OSBuildNumber  = current_version->dwBuildNumber;
     NtCurrentTeb()->Peb->OSPlatformId   = current_version->dwPlatformId;
 
-    TRACE( "got %d.%d platform %d build %x name %s service pack %d.%d product %d\n",
+    TRACE( "got %ld.%ld platform %ld build %lx name %s service pack %d.%d product %d\n",
            current_version->dwMajorVersion, current_version->dwMinorVersion,
            current_version->dwPlatformId, current_version->dwBuildNumber,
            debugstr_w(current_version->szCSDVersion),
@@ -544,7 +544,7 @@ done:
 BOOLEAN WINAPI RtlGetProductInfo(DWORD dwOSMajorVersion, DWORD dwOSMinorVersion, DWORD dwSpMajorVersion,
                                  DWORD dwSpMinorVersion, PDWORD pdwReturnedProductType)
 {
-    TRACE("(%d, %d, %d, %d, %p)\n", dwOSMajorVersion, dwOSMinorVersion,
+    TRACE("(%ld, %ld, %ld, %ld, %p)\n", dwOSMajorVersion, dwOSMinorVersion,
           dwSpMajorVersion, dwSpMinorVersion, pdwReturnedProductType);
 
     if (!pdwReturnedProductType)
@@ -681,7 +681,7 @@ NTSTATUS WINAPI RtlVerifyVersionInfo( const RTL_OSVERSIONINFOEXW *info,
     RTL_OSVERSIONINFOEXW ver;
     NTSTATUS status;
 
-    TRACE("(%p,0x%x,0x%s)\n", info, dwTypeMask, wine_dbgstr_longlong(dwlConditionMask));
+    TRACE("(%p,0x%lx,0x%s)\n", info, dwTypeMask, wine_dbgstr_longlong(dwlConditionMask));
 
     ver.dwOSVersionInfoSize = sizeof(ver);
     if ((status = RtlGetVersion( &ver )) != STATUS_SUCCESS) return status;

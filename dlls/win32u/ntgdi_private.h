@@ -49,7 +49,7 @@ typedef struct tagDC
     HDC          hSelf;            /* Handle to this DC */
     struct gdi_physdev nulldrv;    /* physdev for the null driver */
     PHYSDEV      physDev;          /* current top of the physdev stack */
-    DWORD        thread;           /* thread owning the DC */
+    UINT         thread;           /* thread owning the DC */
     LONG         refcount;         /* thread refcount */
     LONG         dirty;            /* dirty flag */
     DC_ATTR     *attr;             /* DC attributes accessible by client */
@@ -181,6 +181,7 @@ extern struct dce *get_dc_dce( HDC hdc ) DECLSPEC_HIDDEN;
 extern void set_dc_dce( HDC hdc, struct dce *dce ) DECLSPEC_HIDDEN;
 extern WORD set_dce_flags( HDC hdc, WORD flags ) DECLSPEC_HIDDEN;
 extern DWORD set_stretch_blt_mode( HDC hdc, DWORD mode ) DECLSPEC_HIDDEN;
+extern BOOL set_viewport_org( HDC hdc, INT x, INT y, POINT *point ) DECLSPEC_HIDDEN;
 extern void DC_InitDC( DC * dc ) DECLSPEC_HIDDEN;
 extern void DC_UpdateXforms( DC * dc ) DECLSPEC_HIDDEN;
 
@@ -228,7 +229,7 @@ extern const struct gdi_dc_funcs *get_display_driver(void) DECLSPEC_HIDDEN;
 
 struct font_gamma_ramp
 {
-    DWORD gamma;
+    UINT  gamma;
     BYTE  encode[256];
     BYTE  decode[256];
 };
@@ -312,24 +313,23 @@ struct gdi_font
 struct font_backend_funcs
 {
     void  (*load_fonts)(void);
-    BOOL  (*enum_family_fallbacks)( DWORD pitch_and_family, int index, WCHAR buffer[LF_FACESIZE] );
-    INT   (*add_font)( const WCHAR *file, DWORD flags );
-    INT   (*add_mem_font)( void *ptr, SIZE_T size, DWORD flags );
+    BOOL  (*enum_family_fallbacks)( UINT pitch_and_family, int index, WCHAR buffer[LF_FACESIZE] );
+    INT   (*add_font)( const WCHAR *file, UINT flags );
+    INT   (*add_mem_font)( void *ptr, SIZE_T size, UINT flags );
 
     BOOL  (*load_font)( struct gdi_font *gdi_font );
-    DWORD (*get_font_data)( struct gdi_font *gdi_font, DWORD table, DWORD offset,
-                            void *buf, DWORD count );
+    UINT  (*get_font_data)( struct gdi_font *gdi_font, UINT table, UINT offset, void *buf, UINT count );
     UINT  (*get_aa_flags)( struct gdi_font *font, UINT aa_flags, BOOL antialias_fakes );
     BOOL  (*get_glyph_index)( struct gdi_font *gdi_font, UINT *glyph, BOOL use_encoding );
     UINT  (*get_default_glyph)( struct gdi_font *gdi_font );
-    DWORD (*get_glyph_outline)( struct gdi_font *font, UINT glyph, UINT format,
-                                GLYPHMETRICS *gm, ABC *abc, DWORD buflen, void *buf,
+    UINT  (*get_glyph_outline)( struct gdi_font *font, UINT glyph, UINT format,
+                                GLYPHMETRICS *gm, ABC *abc, UINT buflen, void *buf,
                                 const MAT2 *mat, BOOL tategaki );
-    DWORD (*get_unicode_ranges)( struct gdi_font *font, GLYPHSET *gs );
+    UINT  (*get_unicode_ranges)( struct gdi_font *font, GLYPHSET *gs );
     BOOL  (*get_char_width_info)( struct gdi_font *font, struct char_width_info *info );
     BOOL  (*set_outline_text_metrics)( struct gdi_font *font );
     BOOL  (*set_bitmap_text_metrics)( struct gdi_font *font );
-    DWORD (*get_kerning_pairs)( struct gdi_font *gdi_font, KERNINGPAIR **kern_pair );
+    UINT  (*get_kerning_pairs)( struct gdi_font *gdi_font, KERNINGPAIR **kern_pair );
     void  (*destroy_font)( struct gdi_font *font );
 };
 
@@ -339,7 +339,6 @@ extern int add_gdi_face( const WCHAR *family_name, const WCHAR *second_name,
                          DWORD ntmflags, DWORD version, DWORD flags,
                          const struct bitmap_font_size *size ) DECLSPEC_HIDDEN;
 extern UINT font_init(void) DECLSPEC_HIDDEN;
-extern UINT get_acp(void) DECLSPEC_HIDDEN;
 extern CPTABLEINFO *get_cptable( WORD cp ) DECLSPEC_HIDDEN;
 extern const struct font_backend_funcs *init_freetype_lib(void) DECLSPEC_HIDDEN;
 
@@ -382,7 +381,6 @@ extern void GDI_ReleaseObj( HGDIOBJ ) DECLSPEC_HIDDEN;
 extern UINT GDI_get_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern HGDIOBJ GDI_inc_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern BOOL GDI_dec_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
-extern HGDIOBJ get_stock_object( INT obj ) DECLSPEC_HIDDEN;
 extern DWORD get_gdi_object_type( HGDIOBJ obj ) DECLSPEC_HIDDEN;
 extern void make_gdi_object_system( HGDIOBJ handle, BOOL set ) DECLSPEC_HIDDEN;
 
@@ -392,7 +390,6 @@ extern void lp_to_dp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern BOOL set_map_mode( DC *dc, int mode ) DECLSPEC_HIDDEN;
 extern void combine_transform( XFORM *result, const XFORM *xform1,
                                const XFORM *xform2 ) DECLSPEC_HIDDEN;
-extern int muldiv( int a, int b, int c ) DECLSPEC_HIDDEN;
 
 /* driver.c */
 extern BOOL is_display_device( LPCWSTR name ) DECLSPEC_HIDDEN;
@@ -533,38 +530,13 @@ static inline DC *get_physdev_dc( PHYSDEV dev )
     return get_nulldrv_dc( dev );
 }
 
-BOOL WINAPI FontIsLinked(HDC);
-
-BOOL WINAPI SetVirtualResolution(HDC hdc, DWORD horz_res, DWORD vert_res, DWORD horz_size, DWORD vert_size);
-
-static inline BOOL is_rect_empty( const RECT *rect )
-{
-    return (rect->left >= rect->right || rect->top >= rect->bottom);
-}
-
 static inline BOOL intersect_rect( RECT *dst, const RECT *src1, const RECT *src2 )
 {
     dst->left   = max( src1->left, src2->left );
     dst->top    = max( src1->top, src2->top );
     dst->right  = min( src1->right, src2->right );
     dst->bottom = min( src1->bottom, src2->bottom );
-    return !is_rect_empty( dst );
-}
-
-static inline void offset_rect( RECT *rect, int offset_x, int offset_y )
-{
-    rect->left   += offset_x;
-    rect->top    += offset_y;
-    rect->right  += offset_x;
-    rect->bottom += offset_y;
-}
-
-static inline void set_rect( RECT *rect, int left, int top, int right, int bottom )
-{
-    rect->left = left;
-    rect->top = top;
-    rect->right = right;
-    rect->bottom = bottom;
+    return !IsRectEmpty( dst );
 }
 
 static inline void order_rect( RECT *rect )
@@ -611,9 +583,9 @@ static inline void reset_bounds( RECT *bounds )
 
 static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
 {
-    if (is_rect_empty( src1 ))
+    if (IsRectEmpty( src1 ))
     {
-        if (is_rect_empty( src2 ))
+        if (IsRectEmpty( src2 ))
         {
             reset_bounds( dest );
             return;
@@ -622,7 +594,7 @@ static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
     }
     else
     {
-        if (is_rect_empty( src2 )) *dest = *src1;
+        if (IsRectEmpty( src2 )) *dest = *src1;
         else
         {
             dest->left   = min( src1->left, src2->left );
@@ -635,7 +607,7 @@ static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
 
 static inline void add_bounds_rect( RECT *bounds, const RECT *rect )
 {
-    if (is_rect_empty( rect )) return;
+    if (IsRectEmpty( rect )) return;
     bounds->left   = min( bounds->left, rect->left );
     bounds->top    = min( bounds->top, rect->top );
     bounds->right  = max( bounds->right, rect->right );

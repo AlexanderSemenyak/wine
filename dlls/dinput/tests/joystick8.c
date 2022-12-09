@@ -47,13 +47,11 @@
 #include "windows.gaming.input.h"
 #undef Size
 
-#define MAKE_FUNC(f) static typeof(f) *p ## f
-MAKE_FUNC( RoGetActivationFactory );
-MAKE_FUNC( RoInitialize );
-MAKE_FUNC( WindowsCreateString );
-MAKE_FUNC( WindowsDeleteString );
-MAKE_FUNC( WindowsGetStringRawBuffer );
-#undef MAKE_FUNC
+static HRESULT (WINAPI *pRoGetActivationFactory)( HSTRING, REFIID, void** );
+static HRESULT (WINAPI *pRoInitialize)( RO_INIT_TYPE );
+static HRESULT (WINAPI *pWindowsCreateString)( const WCHAR*, UINT32, HSTRING* );
+static HRESULT (WINAPI *pWindowsDeleteString)( HSTRING str );
+static const WCHAR* (WINAPI *pWindowsGetStringRawBuffer)( HSTRING, UINT32* );
 
 static BOOL load_combase_functions(void)
 {
@@ -74,7 +72,7 @@ failed:
     return FALSE;
 }
 
-struct check_objects_todos
+struct check_object_todo
 {
     BOOL type;
     BOOL ofs;
@@ -91,17 +89,48 @@ struct check_objects_params
     UINT index;
     UINT expect_count;
     const DIDEVICEOBJECTINSTANCEW *expect_objs;
-    const struct check_objects_todos *todo_objs;
+    const struct check_object_todo *todo_objs;
     BOOL todo_extra;
 };
+
+#define check_object( a, b, c ) check_object_( __LINE__, a, b, c )
+static void check_object_( int line, const DIDEVICEOBJECTINSTANCEW *actual,
+                           const DIDEVICEOBJECTINSTANCEW *expected,
+                           const struct check_object_todo *todo )
+{
+    static const struct check_object_todo todo_none = {0};
+    if (!todo) todo = &todo_none;
+
+    check_member_( __FILE__, line, *actual, *expected, "%lu", dwSize );
+    todo_wine_if( todo->guid )
+    check_member_guid_( __FILE__, line, *actual, *expected, guidType );
+    todo_wine_if( todo->ofs )
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwOfs );
+    todo_wine_if( todo->type )
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwType );
+    todo_wine_if( todo->flags )
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwFlags );
+    if (!localized) todo_wine_if( todo->name ) check_member_wstr_( __FILE__, line, *actual, *expected, tszName );
+    check_member_( __FILE__, line, *actual, *expected, "%lu", dwFFMaxForce );
+    check_member_( __FILE__, line, *actual, *expected, "%lu", dwFFForceResolution );
+    check_member_( __FILE__, line, *actual, *expected, "%u", wCollectionNumber );
+    check_member_( __FILE__, line, *actual, *expected, "%u", wDesignatorIndex );
+    todo_wine_if( todo->usage_page )
+    check_member_( __FILE__, line, *actual, *expected, "%#04x", wUsagePage );
+    todo_wine_if( todo->usage )
+    check_member_( __FILE__, line, *actual, *expected, "%#04x", wUsage );
+    check_member_( __FILE__, line, *actual, *expected, "%#lx", dwDimension );
+    check_member_( __FILE__, line, *actual, *expected, "%#04x", wExponent );
+    check_member_( __FILE__, line, *actual, *expected, "%u", wReportId );
+}
 
 static BOOL CALLBACK check_objects( const DIDEVICEOBJECTINSTANCEW *obj, void *args )
 {
     static const DIDEVICEOBJECTINSTANCEW unexpected_obj = {0};
-    static const struct check_objects_todos todo_none = {0};
+    static const struct check_object_todo todo_none = {0};
     struct check_objects_params *params = args;
     const DIDEVICEOBJECTINSTANCEW *exp = params->expect_objs + params->index;
-    const struct check_objects_todos *todo;
+    const struct check_object_todo *todo;
 
     if (!params->todo_objs) todo = &todo_none;
     else todo = params->todo_objs + params->index;
@@ -115,27 +144,7 @@ static BOOL CALLBACK check_objects( const DIDEVICEOBJECTINSTANCEW *obj, void *ar
     ok( params->index < params->expect_count, "unexpected extra object\n" );
     if (params->index >= params->expect_count) exp = &unexpected_obj;
 
-    check_member( *obj, *exp, "%lu", dwSize );
-    todo_wine_if( todo->guid )
-    check_member_guid( *obj, *exp, guidType );
-    todo_wine_if( todo->ofs )
-    check_member( *obj, *exp, "%#lx", dwOfs );
-    todo_wine_if( todo->type )
-    check_member( *obj, *exp, "%#lx", dwType );
-    todo_wine_if( todo->flags )
-    check_member( *obj, *exp, "%#lx", dwFlags );
-    if (!localized) todo_wine_if( todo->name )check_member_wstr( *obj, *exp, tszName );
-    check_member( *obj, *exp, "%lu", dwFFMaxForce );
-    check_member( *obj, *exp, "%lu", dwFFForceResolution );
-    check_member( *obj, *exp, "%u", wCollectionNumber );
-    check_member( *obj, *exp, "%u", wDesignatorIndex );
-    todo_wine_if( todo->usage_page )
-    check_member( *obj, *exp, "%#04x", wUsagePage );
-    todo_wine_if( todo->usage )
-    check_member( *obj, *exp, "%#04x", wUsage );
-    check_member( *obj, *exp, "%#lx", dwDimension );
-    check_member( *obj, *exp, "%#04x", wExponent );
-    check_member( *obj, *exp, "%u", wReportId );
+    check_object( obj, exp, todo );
 
     winetest_pop_context();
 
@@ -396,7 +405,7 @@ static void test_simple_joystick( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
-#undef REPORT_ID_OR_USAGE_PAGE
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
@@ -708,7 +717,7 @@ static void test_simple_joystick( DWORD version )
             .wReportId = 1,
         },
     };
-    struct check_objects_todos todo_objects_5[ARRAY_SIZE(expect_objects_5)] =
+    struct check_object_todo todo_objects_5[ARRAY_SIZE(expect_objects_5)] =
     {
         {.guid = TRUE, .type = TRUE, .flags = TRUE, .usage = TRUE, .usage_page = TRUE, .name = TRUE},
         {.guid = TRUE, .type = TRUE, .flags = TRUE, .usage = TRUE, .usage_page = TRUE, .name = TRUE},
@@ -718,6 +727,7 @@ static void test_simple_joystick( DWORD version )
         {.guid = TRUE, .ofs = TRUE, .type = TRUE, .flags = TRUE, .usage = TRUE, .usage_page = TRUE, .name = TRUE},
         {.guid = TRUE, .ofs = TRUE, .type = TRUE, .usage = TRUE, .usage_page = TRUE, .name = TRUE},
     };
+    struct check_object_todo todo_ofs = {.ofs = TRUE};
     struct check_objects_params check_objects_params =
     {
         .version = version,
@@ -802,7 +812,7 @@ static void test_simple_joystick( DWORD version )
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
     if (FAILED(hr = dinput_test_create_device( version, &devinst, &device ))) goto done;
@@ -1117,22 +1127,7 @@ static void test_simple_joystick( DWORD version )
 
     if (version < 0x0700) expect_obj = expect_objects_5[0];
     else expect_obj = expect_objects[4];
-    check_member( objinst, expect_obj, "%lu", dwSize );
-    check_member_guid( objinst, expect_obj, guidType );
-    todo_wine_if( version < 0x0700 )
-    check_member( objinst, expect_obj, "%#lx", dwOfs );
-    check_member( objinst, expect_obj, "%#lx", dwType );
-    check_member( objinst, expect_obj, "%#lx", dwFlags );
-    if (!localized) check_member_wstr( objinst, expect_obj, tszName );
-    check_member( objinst, expect_obj, "%lu", dwFFMaxForce );
-    check_member( objinst, expect_obj, "%lu", dwFFForceResolution );
-    check_member( objinst, expect_obj, "%u", wCollectionNumber );
-    check_member( objinst, expect_obj, "%u", wDesignatorIndex );
-    check_member( objinst, expect_obj, "%#04x", wUsagePage );
-    check_member( objinst, expect_obj, "%#04x", wUsage );
-    check_member( objinst, expect_obj, "%#lx", dwDimension );
-    check_member( objinst, expect_obj, "%#04x", wExponent );
-    check_member( objinst, expect_obj, "%u", wReportId );
+    check_object( &objinst, &expect_obj, version < 0x0700 ? &todo_ofs : NULL );
 
     hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, 0x14, DIPH_BYOFFSET );
     ok( hr == DIERR_NOTFOUND, "GetObjectInfo returned: %#lx\n", hr );
@@ -1147,22 +1142,7 @@ static void test_simple_joystick( DWORD version )
 
     if (version < 0x0700) expect_obj = expect_objects_5[6];
     else expect_obj = expect_objects[8];
-    check_member( objinst, expect_obj, "%lu", dwSize );
-    check_member_guid( objinst, expect_obj, guidType );
-    todo_wine_if( version < 0x0700 )
-    check_member( objinst, expect_obj, "%#lx", dwOfs );
-    check_member( objinst, expect_obj, "%#lx", dwType );
-    check_member( objinst, expect_obj, "%#lx", dwFlags );
-    if (!localized) check_member_wstr( objinst, expect_obj, tszName );
-    check_member( objinst, expect_obj, "%lu", dwFFMaxForce );
-    check_member( objinst, expect_obj, "%lu", dwFFForceResolution );
-    check_member( objinst, expect_obj, "%u", wCollectionNumber );
-    check_member( objinst, expect_obj, "%u", wDesignatorIndex );
-    check_member( objinst, expect_obj, "%#04x", wUsagePage );
-    check_member( objinst, expect_obj, "%#04x", wUsage );
-    check_member( objinst, expect_obj, "%#lx", dwDimension );
-    check_member( objinst, expect_obj, "%#04x", wExponent );
-    check_member( objinst, expect_obj, "%u", wReportId );
+    check_object( &objinst, &expect_obj, version < 0x0700 ? &todo_ofs : NULL );
 
     hr = IDirectInputDevice8_EnumEffects( device, NULL, NULL, DIEFT_ALL );
     ok( hr == DIERR_INVALIDPARAM, "EnumEffects returned %#lx\n", hr );
@@ -1209,22 +1189,7 @@ static void test_simple_joystick( DWORD version )
     if (version < 0x0700) expect_obj = expect_objects_5[1];
     else expect_obj = expect_objects[3];
     if (version < 0x0800) expect_obj.dwOfs = DIJOFS_Y;
-    check_member( objinst, expect_obj, "%lu", dwSize );
-    check_member_guid( objinst, expect_obj, guidType );
-    todo_wine_if( version < 0x0800 )
-    check_member( objinst, expect_obj, "%#lx", dwOfs );
-    check_member( objinst, expect_obj, "%#lx", dwType );
-    check_member( objinst, expect_obj, "%#lx", dwFlags );
-    if (!localized) check_member_wstr( objinst, expect_obj, tszName );
-    check_member( objinst, expect_obj, "%lu", dwFFMaxForce );
-    check_member( objinst, expect_obj, "%lu", dwFFForceResolution );
-    check_member( objinst, expect_obj, "%u", wCollectionNumber );
-    check_member( objinst, expect_obj, "%u", wDesignatorIndex );
-    check_member( objinst, expect_obj, "%#04x", wUsagePage );
-    check_member( objinst, expect_obj, "%#04x", wUsage );
-    check_member( objinst, expect_obj, "%#lx", dwDimension );
-    check_member( objinst, expect_obj, "%#04x", wExponent );
-    check_member( objinst, expect_obj, "%u", wReportId );
+    check_object( &objinst, &expect_obj, version < 0x0800 ? &todo_ofs : NULL );
 
     hr = IDirectInputDevice8_SetEventNotification( device, (HANDLE)0xdeadbeef );
     todo_wine
@@ -1252,7 +1217,6 @@ static void test_simple_joystick( DWORD version )
 
     hwnd = CreateWindowW( L"static", L"dinput", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 10, 10, 200, 200,
                           NULL, NULL, NULL, NULL );
-    SetForegroundWindow( hwnd );
 
     hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE );
     ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
@@ -1261,6 +1225,8 @@ static void test_simple_joystick( DWORD version )
     hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_EXCLUSIVE );
     ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
 
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE );
+    ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_NOEFFECT, "Unacquire returned: %#lx\n", hr );
     hr = IDirectInputDevice8_Acquire( device );
@@ -1359,6 +1325,11 @@ static void test_simple_joystick( DWORD version )
 
     send_hid_input( file, &injected_input[0], sizeof(*injected_input) );
     res = WaitForSingleObject( event, 100 );
+    if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
+    {
+        send_hid_input( file, &injected_input[0], sizeof(*injected_input) );
+        res = WaitForSingleObject( event, 100 );
+    }
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
     ResetEvent( event );
 
@@ -1385,6 +1356,11 @@ static void test_simple_joystick( DWORD version )
 
     send_hid_input( file, &injected_input[1], sizeof(*injected_input) );
     res = WaitForSingleObject( event, 100 );
+    if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
+    {
+        send_hid_input( file, &injected_input[1], sizeof(*injected_input) );
+        res = WaitForSingleObject( event, 100 );
+    }
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
     ResetEvent( event );
 
@@ -1582,9 +1558,15 @@ static void test_simple_joystick( DWORD version )
 
     send_hid_input( file, &injected_input[4], sizeof(*injected_input) );
     res = WaitForSingleObject( event, 100 );
+    if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
+    {
+        send_hid_input( file, &injected_input[4], sizeof(*injected_input) );
+        res = WaitForSingleObject( event, 100 );
+    }
     todo_wine
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
     ResetEvent( event );
+
     send_hid_input( file, &injected_input[3], sizeof(*injected_input) );
     res = WaitForSingleObject( event, 100 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
@@ -1597,6 +1579,10 @@ static void test_simple_joystick( DWORD version )
     ok( ((ULONG *)buffer)[2] == 0x7fff, "got %#lx, expected %#x\n", ((ULONG *)buffer)[2], 0x7fff );
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_OK, "Unacquire returned: %#lx\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_LOGICALRANGE, &prop_range.diph );
+    ok( hr == DIERR_UNSUPPORTED, "SetProperty DIPROP_LOGICALRANGE returned %#lx\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_PHYSICALRANGE, &prop_range.diph );
+    ok( hr == DIERR_UNSUPPORTED, "SetProperty DIPROP_PHYSICALRANGE returned %#lx\n", hr );
 
     hr = IDirectInputDevice8_SetDataFormat( device, &c_dfDIJoystick2 );
     ok( hr == DI_OK, "SetDataFormat returned: %#lx\n", hr );
@@ -1605,8 +1591,14 @@ static void test_simple_joystick( DWORD version )
 
     send_hid_input( file, &injected_input[4], sizeof(*injected_input) );
     res = WaitForSingleObject( event, 100 );
+    if (res == WAIT_TIMEOUT) /* Acquire is asynchronous */
+    {
+        send_hid_input( file, &injected_input[4], sizeof(*injected_input) );
+        res = WaitForSingleObject( event, 100 );
+    }
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
     ResetEvent( event );
+
     send_hid_input( file, &injected_input[3], sizeof(*injected_input) );
     res = WaitForSingleObject( event, 100 );
     ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
@@ -1647,15 +1639,6 @@ static void test_simple_joystick( DWORD version )
     ok( hr == (version < 0x0800 ? DIERR_UNSUPPORTED : DIERR_ACQUIRED),
         "SetProperty DIPROP_PHYSICALRANGE returned %#lx\n", hr );
 
-    hr = IDirectInputDevice8_Unacquire( device );
-    ok( hr == DI_OK, "Unacquire returned: %#lx\n", hr );
-    hr = IDirectInputDevice8_SetProperty( device, DIPROP_LOGICALRANGE, &prop_range.diph );
-    ok( hr == DIERR_UNSUPPORTED, "SetProperty DIPROP_LOGICALRANGE returned %#lx\n", hr );
-    hr = IDirectInputDevice8_SetProperty( device, DIPROP_PHYSICALRANGE, &prop_range.diph );
-    ok( hr == DIERR_UNSUPPORTED, "SetProperty DIPROP_PHYSICALRANGE returned %#lx\n", hr );
-    hr = IDirectInputDevice8_Acquire( device );
-    ok( hr == DI_OK, "Unacquire returned: %#lx\n", hr );
-
     prop_range.diph.dwHow = DIPH_DEVICE;
     prop_range.diph.dwObj = 0;
     prop_range.lMin = 0xdeadbeef;
@@ -1681,8 +1664,8 @@ static void test_simple_joystick( DWORD version )
 
     hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
     ok( hr == DI_OK, "GetDeviceState returned: %#lx\n", hr );
-    check_member( state, expect_state_abs[1], "%ld", lX );
-    check_member( state, expect_state_abs[1], "%ld", lY );
+    ok( state.lX == expect_state_abs[1].lX || broken( state.lX == 16853 ) /* w8 */, "got lX %ld\n", state.lX );
+    ok( state.lY == expect_state_abs[1].lY || broken( state.lY == 16853 ) /* w8 */, "got lY %ld\n", state.lY );
     check_member( state, expect_state_abs[1], "%ld", lZ );
     check_member( state, expect_state_abs[1], "%ld", lRx );
     check_member( state, expect_state_abs[1], "%ld", rgdwPOV[0] );
@@ -1832,7 +1815,8 @@ static void test_simple_joystick( DWORD version )
         send_hid_input( file, &injected_input[i], sizeof(*injected_input) );
 
         res = WaitForSingleObject( event, 100 );
-        if (i == 0 || i == 3) ok( res == WAIT_TIMEOUT, "WaitForSingleObject succeeded\n" );
+        if (i == 0) ok( res == WAIT_TIMEOUT || broken( res == WAIT_OBJECT_0 ) /* w8 */, "WaitForSingleObject succeeded\n" );
+        else if (i == 3) ok( res == WAIT_TIMEOUT, "WaitForSingleObject succeeded\n" );
         else ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
         ResetEvent( event );
         winetest_pop_context();
@@ -1977,6 +1961,11 @@ static void test_simple_joystick( DWORD version )
         send_hid_input( file, &injected_input[i], sizeof(*injected_input) );
 
         res = WaitForSingleObject( event, 100 );
+        if (i == 0 && res == WAIT_TIMEOUT) /* Acquire is asynchronous */
+        {
+            send_hid_input( file, &injected_input[i], sizeof(*injected_input) );
+            res = WaitForSingleObject( event, 100 );
+        }
         if (i == 3) ok( res == WAIT_TIMEOUT, "WaitForSingleObject succeeded\n" );
         else ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
         ResetEvent( event );
@@ -2110,6 +2099,7 @@ static BOOL test_device_types( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(unknown_desc) < MAX_HID_DESCRIPTOR_LEN);
     static const unsigned char limited_desc[] =
     {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
@@ -2140,6 +2130,7 @@ static BOOL test_device_types( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(limited_desc) < MAX_HID_DESCRIPTOR_LEN);
     static const unsigned char gamepad_desc[] =
     {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
@@ -2170,6 +2161,7 @@ static BOOL test_device_types( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(gamepad_desc) < MAX_HID_DESCRIPTOR_LEN);
     static const unsigned char joystick_desc[] =
     {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
@@ -2210,6 +2202,7 @@ static BOOL test_device_types( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(joystick_desc) < MAX_HID_DESCRIPTOR_LEN);
     static const unsigned char wheel_steering_only_desc[] =
     {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
@@ -2248,6 +2241,7 @@ static BOOL test_device_types( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(wheel_steering_only_desc) < MAX_HID_DESCRIPTOR_LEN);
     static const unsigned char wheel_dualpedals_desc[] =
     {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
@@ -2289,6 +2283,7 @@ static BOOL test_device_types( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(wheel_dualpedals_desc) < MAX_HID_DESCRIPTOR_LEN);
     static const unsigned char wheel_threepedals_desc[] =
     {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
@@ -2331,6 +2326,7 @@ static BOOL test_device_types( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(wheel_threepedals_desc) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     static struct device_desc device_desc[] =
@@ -2568,7 +2564,7 @@ static BOOL test_device_types( DWORD version )
         desc.caps = device_desc[i].hid_caps;
         desc.report_descriptor_len = device_desc[i].report_desc_len;
         memcpy( desc.report_descriptor_buf, device_desc[i].report_desc_buf, device_desc[i].report_desc_len );
-        fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+        fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
         if (!hid_device_start( &desc ))
         {
@@ -2621,6 +2617,527 @@ static BOOL test_device_types( DWORD version )
     return success;
 }
 
+struct three_sliders_state
+{
+    LONG slider[3];
+};
+
+static const DIOBJECTDATAFORMAT df_three_sliders[] =
+{
+    {&GUID_Slider, FIELD_OFFSET(struct three_sliders_state, slider[0]), DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION},
+    {&GUID_Slider, FIELD_OFFSET(struct three_sliders_state, slider[1]), DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION},
+    {&GUID_Slider, FIELD_OFFSET(struct three_sliders_state, slider[2]), DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION},
+};
+
+static const DIDATAFORMAT c_df_three_sliders =
+{
+    sizeof(DIDATAFORMAT),
+    sizeof(DIOBJECTDATAFORMAT),
+    DIDF_ABSAXIS,
+    sizeof(struct three_sliders_state),
+    ARRAY_SIZE(df_three_sliders),
+    (DIOBJECTDATAFORMAT *)df_three_sliders,
+};
+
+static void test_many_axes_joystick(void)
+{
+#include "psh_hid_macros.h"
+    static const unsigned char report_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 1),
+
+                USAGE(1, HID_USAGE_GENERIC_DIAL),
+                USAGE(1, HID_USAGE_GENERIC_SLIDER),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_RUDDER),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_THROTTLE),
+                USAGE(1, HID_USAGE_GENERIC_RZ),
+                USAGE(1, HID_USAGE_GENERIC_RY),
+                USAGE(1, HID_USAGE_GENERIC_RX),
+                USAGE(1, HID_USAGE_GENERIC_Z),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 10),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_Z),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                UNIT(4, 0xf011), /* cm * s^-1 */
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 3),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_Z),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                UNIT(4, 0xe011), /* cm * s^-2 */
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 3),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_Z),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                UNIT(4, 0xe111), /* g * cm * s^-2 */
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 3),
+                INPUT(1, Data|Var|Abs),
+                UNIT(1, 0), /* None */
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
+#include "pop_hid_macros.h"
+
+    struct hid_device_desc desc =
+    {
+        .use_report_id = TRUE,
+        .caps = { .InputReportByteLength = 20 },
+        .attributes = default_attributes,
+    };
+    const DIDEVCAPS expect_caps =
+    {
+        .dwSize = sizeof(DIDEVCAPS),
+        .dwFlags = DIDC_ATTACHED | DIDC_EMULATED,
+        .dwDevType = DIDEVTYPE_HID | (DI8DEVTYPE1STPERSON_LIMITED << 8) | DI8DEVTYPE_1STPERSON,
+        .dwAxes = 19,
+    };
+    const DIDEVICEINSTANCEW expect_devinst =
+    {
+        .dwSize = sizeof(DIDEVICEINSTANCEW),
+        .guidInstance = expect_guid_product,
+        .guidProduct = expect_guid_product,
+        .dwDevType = DIDEVTYPE_HID | (DI8DEVTYPE1STPERSON_LIMITED << 8) | DI8DEVTYPE_1STPERSON,
+        .tszInstanceName = L"Wine Test",
+        .tszProductName = L"Wine Test",
+        .guidFFDriver = GUID_NULL,
+        .wUsagePage = HID_USAGE_PAGE_GENERIC,
+        .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+    };
+    const DIDEVICEOBJECTINSTANCEW expect_objects[] =
+    {
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_XAxis,
+            .dwOfs = 0,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(0),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"X Axis",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_X,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_YAxis,
+            .dwOfs = 0x4,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(1),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Y Axis",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Y,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_ZAxis,
+            .dwOfs = 0x8,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(2),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Z Axis",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Z,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_RxAxis,
+            .dwOfs = 0xc,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(3),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"X Rotation",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_RX,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_RyAxis,
+            .dwOfs = 0x10,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(4),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Y Rotation",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_RY,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_RzAxis,
+            .dwOfs = 0x14,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(5),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Z Rotation",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_RZ,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Slider,
+            .dwOfs = 0x18,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(6),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Throttle",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_SIMULATION,
+            .wUsage = HID_USAGE_SIMULATION_THROTTLE,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_RzAxis,
+            .dwOfs = 0x1c,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(7),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Rudder",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_SIMULATION,
+            .wUsage = HID_USAGE_SIMULATION_RUDDER,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Slider,
+            .dwOfs = 0x20,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(8),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Slider",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_SLIDER,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Slider,
+            .dwOfs = 0x24,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(9),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Dial",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_DIAL,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_XAxis,
+            .dwOfs = 0x28,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(10),
+            .dwFlags = DIDOI_ASPECTVELOCITY,
+            .tszName = L"X Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xf011,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_X,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_YAxis,
+            .dwOfs = 0x2c,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(11),
+            .dwFlags = DIDOI_ASPECTVELOCITY,
+            .tszName = L"Y Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xf011,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Y,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_ZAxis,
+            .dwOfs = 0x30,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(12),
+            .dwFlags = DIDOI_ASPECTVELOCITY,
+            .tszName = L"Z Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xf011,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Z,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_XAxis,
+            .dwOfs = 0x34,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(13),
+            .dwFlags = DIDOI_ASPECTACCEL,
+            .tszName = L"X Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xe011,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_X,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_YAxis,
+            .dwOfs = 0x38,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(14),
+            .dwFlags = DIDOI_ASPECTACCEL,
+            .tszName = L"Y Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xe011,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Y,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_ZAxis,
+            .dwOfs = 0x3c,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(15),
+            .dwFlags = DIDOI_ASPECTACCEL,
+            .tszName = L"Z Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xe011,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Z,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_XAxis,
+            .dwOfs = 0x40,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(16),
+            .dwFlags = DIDOI_ASPECTFORCE,
+            .tszName = L"X Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xe111,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_X,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_YAxis,
+            .dwOfs = 0x44,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(17),
+            .dwFlags = DIDOI_ASPECTFORCE,
+            .tszName = L"Y Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xe111,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Y,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_ZAxis,
+            .dwOfs = 0x48,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(18),
+            .dwFlags = DIDOI_ASPECTFORCE,
+            .tszName = L"Z Axis",
+            .wCollectionNumber = 1,
+            .dwDimension = 0xe111,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Z,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Unknown,
+            .dwType = DIDFT_COLLECTION|DIDFT_NODATA|DIDFT_MAKEINSTANCE(0),
+            .tszName = L"Collection 0 - Joystick",
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Unknown,
+            .dwType = DIDFT_COLLECTION|DIDFT_NODATA|DIDFT_MAKEINSTANCE(1),
+            .tszName = L"Collection 1 - Joystick",
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+    };
+    struct check_object_todo todo_objects[ARRAY_SIZE(expect_objects)] =
+    {
+        {0},
+        {0},
+        {0},
+        {0},
+        {0},
+        {0},
+        {0},
+        {0},
+        {0},
+        {0},
+        {.flags = TRUE},
+        {.flags = TRUE},
+        {.flags = TRUE},
+        {.flags = TRUE},
+        {.flags = TRUE},
+        {.flags = TRUE},
+        {.flags = TRUE},
+        {.flags = TRUE},
+        {.flags = TRUE},
+    };
+    struct check_objects_params check_objects_params =
+    {
+        .version = DIRECTINPUT_VERSION,
+        .expect_count = ARRAY_SIZE(expect_objects),
+        .expect_objs = expect_objects,
+        .todo_objs = todo_objects,
+    };
+
+    DIDEVICEOBJECTINSTANCEW objinst = {.dwSize = sizeof(DIDEVICEOBJECTINSTANCEW)};
+    struct check_object_todo todo_flags = {.flags = TRUE};
+    DIDEVICEINSTANCEW devinst = {0};
+    IDirectInputDevice8W *device;
+    DIDEVCAPS caps = {0};
+    HRESULT hr;
+    ULONG ref;
+
+    cleanup_registry_keys();
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
+
+    if (!hid_device_start( &desc )) goto done;
+    if (FAILED(hr = dinput_test_create_device( DIRECTINPUT_VERSION, &devinst, &device ))) goto done;
+
+    check_dinput_devices( DIRECTINPUT_VERSION, &devinst );
+
+    memset( &devinst, 0, sizeof(devinst) );
+    devinst.dwSize = sizeof(DIDEVICEINSTANCEW);
+    hr = IDirectInputDevice8_GetDeviceInfo( device, &devinst );
+    ok( hr == DI_OK, "GetDeviceInfo returned %#lx\n", hr );
+    check_member( devinst, expect_devinst, "%lu", dwSize );
+    todo_wine
+    check_member_guid( devinst, expect_devinst, guidInstance );
+    check_member_guid( devinst, expect_devinst, guidProduct );
+    todo_wine
+    check_member( devinst, expect_devinst, "%#lx", dwDevType );
+    check_member_wstr( devinst, expect_devinst, tszInstanceName );
+    check_member_wstr( devinst, expect_devinst, tszProductName );
+    check_member_guid( devinst, expect_devinst, guidFFDriver );
+    check_member( devinst, expect_devinst, "%04x", wUsagePage );
+    check_member( devinst, expect_devinst, "%04x", wUsage );
+
+    hr = IDirectInputDevice8_GetCapabilities( device, NULL );
+    ok( hr == E_POINTER, "GetCapabilities returned %#lx\n", hr );
+    hr = IDirectInputDevice8_GetCapabilities( device, &caps );
+    ok( hr == DIERR_INVALIDPARAM, "GetCapabilities returned %#lx\n", hr );
+    caps.dwSize = sizeof(DIDEVCAPS);
+    hr = IDirectInputDevice8_GetCapabilities( device, &caps );
+    ok( hr == DI_OK, "GetCapabilities returned %#lx\n", hr );
+    check_member( caps, expect_caps, "%lu", dwSize );
+    check_member( caps, expect_caps, "%#lx", dwFlags );
+    todo_wine
+    check_member( caps, expect_caps, "%#lx", dwDevType );
+    check_member( caps, expect_caps, "%lu", dwAxes );
+    check_member( caps, expect_caps, "%lu", dwButtons );
+    check_member( caps, expect_caps, "%lu", dwPOVs );
+    check_member( caps, expect_caps, "%lu", dwFFSamplePeriod );
+    check_member( caps, expect_caps, "%lu", dwFFMinTimeResolution );
+    check_member( caps, expect_caps, "%lu", dwFirmwareRevision );
+    check_member( caps, expect_caps, "%lu", dwHardwareRevision );
+    check_member( caps, expect_caps, "%lu", dwFFDriverVersion );
+
+    hr = IDirectInputDevice8_EnumObjects( device, check_objects, &check_objects_params, DIDFT_ALL );
+    ok( hr == DI_OK, "EnumObjects returned %#lx\n", hr );
+    ok( check_objects_params.index >= check_objects_params.expect_count, "missing %u objects\n",
+        check_objects_params.expect_count - check_objects_params.index );
+
+    hr = IDirectInputDevice8_SetDataFormat( device, &c_dfDIJoystick2 );
+    ok( hr == DI_OK, "SetDataFormat returned: %#lx\n", hr );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, DIJOFS_RZ, DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[5], NULL );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(DIJOYSTATE2, rglSlider[0]), DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[6], NULL );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(DIJOYSTATE2, rglSlider[1]), DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[8], NULL );
+
+    /* c_dfDIJoystick2 is broken when it comes to more than two sliders */
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(DIJOYSTATE2, rglVSlider[0]), DIPH_BYOFFSET );
+    ok( hr == DIERR_NOTFOUND, "GetObjectInfo returned: %#lx\n", hr );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(DIJOYSTATE2, lVX), DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[10], &todo_flags );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(DIJOYSTATE2, lAX), DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[13], &todo_flags );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(DIJOYSTATE2, lFX), DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[16], &todo_flags );
+
+    /* make sure that we handle three sliders correctly when the format allows */
+    hr = IDirectInputDevice8_SetDataFormat( device, &c_df_three_sliders );
+    ok( hr == DI_OK, "SetDataFormat returned: %#lx\n", hr );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(struct three_sliders_state, slider[0]), DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[6], NULL );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(struct three_sliders_state, slider[1]), DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[8], NULL );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, offsetof(struct three_sliders_state, slider[2]), DIPH_BYOFFSET );
+    ok( hr == DI_OK, "GetObjectInfo returned: %#lx\n", hr );
+    check_object( &objinst, &expect_objects[9], NULL );
+
+    ref = IDirectInputDevice8_Release( device );
+    ok( ref == 0, "Release returned %ld\n", ref );
+
+done:
+    hid_device_stop( &desc );
+    cleanup_registry_keys();
+    winetest_pop_context();
+}
+
 static void test_driving_wheel_axes(void)
 {
 #include "psh_hid_macros.h"
@@ -2650,7 +3167,7 @@ static void test_driving_wheel_axes(void)
             END_COLLECTION,
         END_COLLECTION,
     };
-#undef REPORT_ID_OR_USAGE_PAGE
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
@@ -2786,7 +3303,7 @@ static void test_driving_wheel_axes(void)
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
     if (FAILED(hr = dinput_test_create_device( DIRECTINPUT_VERSION, &devinst, &device ))) goto done;
@@ -2844,7 +3361,8 @@ done:
 static BOOL test_winmm_joystick(void)
 {
 #include "psh_hid_macros.h"
-    const unsigned char report_desc[] = {
+    const unsigned char report_desc[] =
+    {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
         USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
         COLLECTION(1, Application),
@@ -2890,6 +3408,7 @@ static BOOL test_winmm_joystick(void)
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
@@ -3020,7 +3539,7 @@ static BOOL test_winmm_joystick(void)
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
 
@@ -3274,8 +3793,8 @@ static HRESULT WINAPI controller_handler_Invoke( IEventHandler_RawGameController
     trace( "iface %p, sender %p, controller %p\n", iface, sender, controller );
 
     ok( sender == NULL, "got sender %p\n", sender );
-    SetEvent( impl->event );
     impl->invoked = TRUE;
+    SetEvent( impl->event );
 
     return S_OK;
 }
@@ -3293,7 +3812,8 @@ static struct controller_handler controller_added = {{&controller_handler_vtbl}}
 static void test_windows_gaming_input(void)
 {
 #include "psh_hid_macros.h"
-    const unsigned char report_desc[] = {
+    const unsigned char report_desc[] =
+    {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
         USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
         COLLECTION(1, Application),
@@ -3335,6 +3855,50 @@ static void test_windows_gaming_input(void)
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
+    static const unsigned char wheel_threepedals_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Physical),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_STEERING),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_ACCELERATOR),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_BRAKE),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_CLUTCH),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 127),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 127),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 5),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 8),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 8),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs|Null),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 5),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 16),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+    C_ASSERT(sizeof(wheel_threepedals_desc) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
@@ -3344,15 +3908,20 @@ static void test_windows_gaming_input(void)
         .attributes = default_attributes,
     };
     static const WCHAR *controller_class_name = RuntimeClass_Windows_Gaming_Input_RawGameController;
+    static const WCHAR *racing_wheel_class_name = RuntimeClass_Windows_Gaming_Input_RacingWheel;
     static const WCHAR *gamepad_class_name = RuntimeClass_Windows_Gaming_Input_Gamepad;
 
     IRawGameController *raw_controller, *tmp_raw_controller;
     IVectorView_RawGameController *controllers_view;
     IRawGameControllerStatics *controller_statics;
     EventRegistrationToken controller_added_token;
+    IVectorView_RacingWheel *racing_wheels_view;
+    IRacingWheelStatics2 *racing_wheel_statics2;
+    IRacingWheelStatics *racing_wheel_statics;
     IVectorView_Gamepad *gamepads_view;
     IGamepadStatics *gamepad_statics;
     IGameController *game_controller;
+    IRacingWheel *racing_wheel;
     UINT32 size;
     HSTRING str;
     HRESULT hr;
@@ -3392,7 +3961,7 @@ static void test_windows_gaming_input(void)
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
     WaitForSingleObject( controller_added.event, INFINITE );
@@ -3462,6 +4031,67 @@ static void test_windows_gaming_input(void)
     hr = IRawGameControllerStatics_remove_RawGameControllerAdded( controller_statics, controller_added_token );
     ok( hr == S_OK, "remove_RawGameControllerAdded returned %#lx\n", hr );
 
+    hid_device_stop( &desc );
+
+
+    desc.report_descriptor_len = sizeof(wheel_threepedals_desc);
+    memcpy( desc.report_descriptor_buf, wheel_threepedals_desc, sizeof(wheel_threepedals_desc) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
+
+    controller_added.event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!controller_added.event, "CreateEventW failed, error %lu\n", GetLastError() );
+
+    hr = IRawGameControllerStatics_add_RawGameControllerAdded( controller_statics, &controller_added.IEventHandler_RawGameController_iface,
+                                                               &controller_added_token );
+    ok( hr == S_OK, "add_RawGameControllerAdded returned %#lx\n", hr );
+    ok( controller_added_token.value, "got token %I64u\n", controller_added_token.value );
+
+    if (!hid_device_start( &desc )) goto done;
+    WaitForSingleObject( controller_added.event, INFINITE );
+    CloseHandle( controller_added.event );
+
+    hr = IRawGameControllerStatics_get_RawGameControllers( controller_statics, &controllers_view );
+    ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
+    hr = IVectorView_RawGameController_get_Size( controllers_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    ok( size == 1, "got size %u\n", size );
+    hr = IVectorView_RawGameController_GetAt( controllers_view, 0, &raw_controller );
+    ok( hr == S_OK, "GetAt returned %#lx\n", hr );
+    IVectorView_RawGameController_Release( controllers_view );
+
+    hr = IRawGameControllerStatics_remove_RawGameControllerAdded( controller_statics, controller_added_token );
+    ok( hr == S_OK, "remove_RawGameControllerAdded returned %#lx\n", hr );
+
+    hr = pWindowsCreateString( racing_wheel_class_name, wcslen( racing_wheel_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IRacingWheelStatics, (void **)&racing_wheel_statics );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IRacingWheelStatics2, (void **)&racing_wheel_statics2 );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    pWindowsDeleteString( str );
+
+    /* HID driving wheels aren't exposed as WGI RacingWheel on Windows */
+
+    hr = IRacingWheelStatics_get_RacingWheels( racing_wheel_statics, &racing_wheels_view );
+    ok( hr == S_OK, "get_RacingWheels returned %#lx\n", hr );
+    hr = IVectorView_RacingWheel_get_Size( racing_wheels_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    todo_wine /* but Wine currently intentionally does */
+    ok( size == 0, "got size %u\n", size );
+    IVectorView_RacingWheel_Release( racing_wheels_view );
+    IRacingWheelStatics_Release( racing_wheel_statics );
+
+    hr = IRawGameController_QueryInterface( raw_controller, &IID_IGameController, (void **)&game_controller );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IRacingWheelStatics2_FromGameController( racing_wheel_statics2, game_controller, &racing_wheel );
+    ok( hr == S_OK, "FromGameController returned %#lx\n", hr );
+    todo_wine
+    ok( racing_wheel == NULL, "got racing_wheel %p\n", racing_wheel );
+    if (racing_wheel) IRacingWheel_Release( racing_wheel );
+    IGameController_Release( game_controller );
+    IRacingWheelStatics2_Release( racing_wheel_statics2 );
+
+    IRawGameController_Release( raw_controller );
     IRawGameControllerStatics_Release( controller_statics );
 
 done:
@@ -3469,12 +4099,279 @@ done:
     cleanup_registry_keys();
 }
 
+static BOOL wm_input_device_change_count;
+static BOOL wm_input_count;
+static char wm_input_buf[1024];
+static UINT wm_input_len;
+
+static LRESULT CALLBACK rawinput_wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    UINT size = sizeof(wm_input_buf);
+
+    if (msg == WM_INPUT_DEVICE_CHANGE) wm_input_device_change_count++;
+    if (msg == WM_INPUT)
+    {
+        wm_input_count++;
+        wm_input_len = GetRawInputData( (HRAWINPUT)lparam, RID_INPUT, (RAWINPUT *)wm_input_buf,
+                                        &size, sizeof(RAWINPUTHEADER) );
+    }
+
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void test_rawinput(void)
+{
+#include "psh_hid_macros.h"
+    static const unsigned char report_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 1),
+
+                USAGE(1, HID_USAGE_GENERIC_WHEEL),
+                USAGE(4, (0xff01u<<16)|(0x1234)),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_RUDDER),
+                USAGE(4, (HID_USAGE_PAGE_DIGITIZER<<16)|HID_USAGE_DIGITIZER_TIP_PRESSURE),
+                USAGE(4, (HID_USAGE_PAGE_CONSUMER<<16)|HID_USAGE_CONSUMER_VOLUME),
+                LOGICAL_MINIMUM(1, 0xe7),
+                LOGICAL_MAXIMUM(1, 0x38),
+                PHYSICAL_MINIMUM(1, 0xe7),
+                PHYSICAL_MAXIMUM(1, 0x38),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 7),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 8),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 8),
+                REPORT_SIZE(1, 4),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs|Null),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 2),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 4),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
+#include "pop_hid_macros.h"
+
+    struct hid_device_desc desc =
+    {
+        .use_report_id = TRUE,
+        .caps = { .InputReportByteLength = 9 },
+        .attributes = default_attributes,
+    };
+    struct hid_expect injected_input[] =
+    {
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x10,0x10,0x10,0x10,0x10,0},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x38,0x38,0x10,0x10,0x10,0xf8},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x01,0x01,0x10,0x10,0x10,0x00},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x01,0x01,0x10,0x10,0x10,0x00},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x80,0x80,0x10,0x10,0x10,0xff},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x10,0xee,0x10,0x10,0x10,0x54},
+        },
+    };
+    WNDCLASSEXW class =
+    {
+        .cbSize = sizeof(WNDCLASSEXW),
+        .hInstance = GetModuleHandleW( NULL ),
+        .lpszClassName = L"rawinput",
+        .lpfnWndProc = rawinput_wndproc,
+    };
+    RAWINPUT *rawinput = (RAWINPUT *)wm_input_buf;
+    RAWINPUTDEVICELIST raw_device_list[16];
+    RAWINPUTDEVICE raw_devices[16];
+    ULONG i, res, device_count;
+    WCHAR path[MAX_PATH] = {0};
+    HANDLE file;
+    UINT count;
+    HWND hwnd;
+    BOOL ret;
+    MSG msg;
+
+    RegisterClassExW( &class );
+
+    cleanup_registry_keys();
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
+
+    hwnd = CreateWindowW( class.lpszClassName, L"dinput", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 10, 10, 200, 200,
+                          NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+
+    count = ARRAY_SIZE(raw_devices);
+    res = GetRegisteredRawInputDevices( raw_devices, &count, sizeof(RAWINPUTDEVICE) );
+    ok( res == 0, "GetRegisteredRawInputDevices returned %lu\n", res );
+    todo_wine
+    ok( count == ARRAY_SIZE(raw_devices), "got count %u\n", count );
+
+    count = ARRAY_SIZE(raw_device_list);
+    res = GetRawInputDeviceList( raw_device_list, &count, sizeof(RAWINPUTDEVICELIST) );
+    ok( res >= 2, "GetRawInputDeviceList returned %lu\n", res );
+    ok( count == ARRAY_SIZE(raw_device_list), "got count %u\n", count );
+    device_count = res;
+
+    if (!hid_device_start( &desc )) goto done;
+
+    count = ARRAY_SIZE(raw_devices);
+    res = GetRegisteredRawInputDevices( raw_devices, &count, sizeof(RAWINPUTDEVICE) );
+    ok( res == 0, "GetRegisteredRawInputDevices returned %lu\n", res );
+    todo_wine
+    ok( count == ARRAY_SIZE(raw_devices), "got count %u\n", count );
+
+
+    while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
+    ok( !wm_input_device_change_count, "got %u WM_INPUT_DEVICE_CHANGE\n", wm_input_device_change_count );
+    ok( !wm_input_count, "got %u WM_INPUT\n", wm_input_count );
+
+    raw_devices[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+    raw_devices[0].usUsage = HID_USAGE_GENERIC_GAMEPAD;
+    raw_devices[0].dwFlags = RIDEV_DEVNOTIFY;
+    raw_devices[0].hwndTarget = hwnd;
+    count = ARRAY_SIZE(raw_devices);
+    ret = RegisterRawInputDevices( raw_devices, 1, sizeof(RAWINPUTDEVICE) );
+    ok( ret, "RegisterRawInputDevices failed, error %lu\n", GetLastError() );
+
+    hid_device_stop( &desc );
+
+    while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
+    ok( !wm_input_device_change_count, "got %u WM_INPUT_DEVICE_CHANGE\n", wm_input_device_change_count );
+    ok( !wm_input_count, "got %u WM_INPUT\n", wm_input_count );
+
+    raw_devices[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+    raw_devices[0].usUsage = HID_USAGE_GENERIC_JOYSTICK;
+    raw_devices[0].dwFlags = RIDEV_DEVNOTIFY;
+    raw_devices[0].hwndTarget = hwnd;
+    count = ARRAY_SIZE(raw_devices);
+    ret = RegisterRawInputDevices( raw_devices, 1, sizeof(RAWINPUTDEVICE) );
+    ok( ret, "RegisterRawInputDevices failed, error %lu\n", GetLastError() );
+
+    hid_device_start( &desc );
+
+    while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
+    ok( wm_input_device_change_count == 1, "got %u WM_INPUT_DEVICE_CHANGE\n", wm_input_device_change_count );
+    ok( !wm_input_count, "got %u WM_INPUT\n", wm_input_count );
+    wm_input_device_change_count = 0;
+
+    raw_devices[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+    raw_devices[0].usUsage = HID_USAGE_GENERIC_JOYSTICK;
+    raw_devices[0].dwFlags = RIDEV_INPUTSINK;
+    raw_devices[0].hwndTarget = hwnd;
+    count = ARRAY_SIZE(raw_devices);
+    ret = RegisterRawInputDevices( raw_devices, 1, sizeof(RAWINPUTDEVICE) );
+    ok( ret, "RegisterRawInputDevices failed, error %lu\n", GetLastError() );
+
+    hid_device_stop( &desc );
+    hid_device_start( &desc );
+
+    while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
+    ok( !wm_input_device_change_count, "got %u WM_INPUT_DEVICE_CHANGE\n", wm_input_device_change_count );
+    ok( !wm_input_count, "got %u WM_INPUT\n", wm_input_count );
+
+
+    count = ARRAY_SIZE(raw_device_list);
+    res = GetRawInputDeviceList( raw_device_list, &count, sizeof(RAWINPUTDEVICELIST) );
+    if (!strcmp( winetest_platform, "wine" ) && res == device_count)
+    {
+        /* Wine refreshes its device list every 2s, but GetRawInputDeviceInfoW with an unknown handle will force it */
+        GetRawInputDeviceInfoW( (HANDLE)0xdeadbeef, RIDI_DEVICEINFO, NULL, &count );
+        res = GetRawInputDeviceList( raw_device_list, &count, sizeof(RAWINPUTDEVICELIST) );
+    }
+    ok( res == device_count + 1, "GetRawInputDeviceList returned %lu\n", res );
+    ok( count == ARRAY_SIZE(raw_device_list), "got count %u\n", count );
+    device_count = res;
+
+    while (device_count--)
+    {
+        if (raw_device_list[device_count].dwType != RIM_TYPEHID) continue;
+
+        count = ARRAY_SIZE(path);
+        res = GetRawInputDeviceInfoW( raw_device_list[device_count].hDevice, RIDI_DEVICENAME, path, &count );
+        ok( res == wcslen( path ) + 1, "GetRawInputDeviceInfoW returned %lu\n", res );
+        todo_wine
+        ok( count == ARRAY_SIZE(path), "got count %u\n", count );
+
+        if (wcsstr( path, expect_vidpid_str )) break;
+    }
+
+    ok( !!wcsstr( path, expect_vidpid_str ), "got path %s\n", debugstr_w(path) );
+
+
+    file = CreateFileW( path, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                        FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
+
+    for (i = 0; i < ARRAY_SIZE(injected_input); ++i)
+    {
+        winetest_push_context( "state[%ld]", i );
+
+        send_hid_input( file, &injected_input[i], sizeof(*injected_input) );
+
+        MsgWaitForMultipleObjects( 0, NULL, FALSE, INFINITE, QS_ALLINPUT );
+        while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
+
+        ok( !wm_input_device_change_count, "got %u WM_INPUT_DEVICE_CHANGE\n", wm_input_device_change_count );
+        ok( wm_input_count == 1, "got %u WM_INPUT\n", wm_input_count );
+        ok( wm_input_len == offsetof(RAWINPUT, data.hid.bRawData[desc.caps.InputReportByteLength]),
+            "got wm_input_len %u\n", wm_input_len );
+        ok( !memcmp( rawinput->data.hid.bRawData, injected_input[i].report_buf, desc.caps.InputReportByteLength ),
+            "got unexpected report data\n" );
+        wm_input_count = 0;
+
+        winetest_pop_context();
+    }
+
+    CloseHandle( file );
+
+done:
+    hid_device_stop( &desc );
+    cleanup_registry_keys();
+
+    DestroyWindow( hwnd );
+    UnregisterClassW( class.lpszClassName, class.hInstance );
+}
+
 START_TEST( joystick8 )
 {
-    if (!dinput_test_init()) return;
+    dinput_test_init();
     if (!bus_device_start()) goto done;
 
-    CoInitialize( NULL );
     if (test_device_types( 0x800 ))
     {
         /* This needs to be done before doing anything involving dinput.dll
@@ -3488,10 +4385,11 @@ START_TEST( joystick8 )
         test_simple_joystick( 0x700 );
         test_simple_joystick( 0x800 );
 
+        test_many_axes_joystick();
         test_driving_wheel_axes();
+        test_rawinput();
         test_windows_gaming_input();
     }
-    CoUninitialize();
 
 done:
     bus_device_stop();

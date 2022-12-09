@@ -27,6 +27,7 @@
 #include "qedit.h"
 #include "d3d9.h"
 #include "vmr9.h"
+#include "videoacc.h"
 #include "wmcodecdsp.h"
 #include "wine/strmbase.h"
 #include "wine/test.h"
@@ -246,6 +247,7 @@ static void test_common_interfaces(IBaseFilter *filter)
     check_interface(filter, &IID_IVMRFilterConfig9, TRUE);
     check_interface(filter, &IID_IVMRMixerBitmap9, TRUE);
 
+    check_interface(filter, &IID_IAMVideoAccelerator, FALSE);
     check_interface(filter, &IID_IBasicAudio, FALSE);
     check_interface(filter, &IID_IDirectDrawVideo, FALSE);
     check_interface(filter, &IID_IPersistPropertyBag, FALSE);
@@ -262,6 +264,7 @@ static void test_common_interfaces(IBaseFilter *filter)
 
     IBaseFilter_FindPin(filter, L"VMR Input0", &pin);
 
+    check_interface(pin, &IID_IAMVideoAccelerator, TRUE);
     check_interface(pin, &IID_IMemInputPin, TRUE);
     check_interface(pin, &IID_IOverlay, TRUE);
     check_interface(pin, &IID_IPin, TRUE);
@@ -1946,6 +1949,7 @@ static void test_video_window_style(IVideoWindow *window, HWND hwnd, HWND our_hw
     style = GetWindowLongA(hwnd, GWL_STYLE);
     ok(style == (WS_CLIPSIBLINGS | WS_OVERLAPPEDWINDOW), "Got style %#lx.\n", style);
 
+    flaky_wine
     ok(GetActiveWindow() == our_hwnd, "Got active window %p.\n", GetActiveWindow());
 
     hr = IVideoWindow_get_WindowStyleEx(window, &style);
@@ -2577,6 +2581,7 @@ static void test_video_window(void)
     filter = create_vmr9(VMR9Mode_Windowed);
     flush_events();
 
+    flaky_wine
     ok(GetActiveWindow() == our_hwnd, "Got active window %p.\n", GetActiveWindow());
 
     IBaseFilter_FindPin(filter, L"VMR Input0", &pin);
@@ -2629,6 +2634,7 @@ static void test_video_window(void)
         IMemAllocator_Release(allocator);
     }
 
+    flaky_wine
     ok(GetActiveWindow() == our_hwnd, "Got active window %p.\n", GetActiveWindow());
 
     test_video_window_caption(window, hwnd);

@@ -677,7 +677,7 @@ static BOOL CertContext_SetKeyProvInfoProperty(CONTEXT_PROPERTY_LIST *properties
     for (i = 0; i < info->cProvParam; i++)
         size += sizeof(CRYPT_KEY_PROV_PARAM) + info->rgProvParam[i].cbData;
 
-    prop = HeapAlloc(GetProcessHeap(), 0, size);
+    prop = CryptMemAlloc(size);
     if (!prop)
     {
         SetLastError(ERROR_OUTOFMEMORY);
@@ -687,7 +687,7 @@ static BOOL CertContext_SetKeyProvInfoProperty(CONTEXT_PROPERTY_LIST *properties
     copy_KeyProvInfoProperty(info, prop);
 
     ret = ContextPropertyList_SetProperty(properties, CERT_KEY_PROV_INFO_PROP_ID, (const BYTE *)prop, size);
-    HeapFree(GetProcessHeap(), 0, prop);
+    CryptMemFree(prop);
 
     return ret;
 }
@@ -865,7 +865,7 @@ static BOOL CRYPT_AcquirePrivateKeyFromProvInfo(PCCERT_CONTEXT pCert, DWORD dwFl
          CERT_KEY_PROV_INFO_PROP_ID, 0, &size);
         if (ret)
         {
-            info = HeapAlloc(GetProcessHeap(), 0, size);
+            info = CryptMemAlloc(size);
             if (info)
             {
                 ret = CertGetCertificateContextProperty(pCert,
@@ -901,7 +901,7 @@ static BOOL CRYPT_AcquirePrivateKeyFromProvInfo(PCCERT_CONTEXT pCert, DWORD dwFl
             SetLastError(CRYPT_E_NO_KEY_PROPERTY);
     }
     if (allocated)
-        HeapFree(GetProcessHeap(), 0, info);
+        CryptMemFree(info);
     return ret;
 }
 
@@ -953,7 +953,7 @@ BOOL WINAPI CryptAcquireCertificatePrivateKey(PCCERT_CONTEXT pCert,
 
         if (ret)
         {
-            info = HeapAlloc(GetProcessHeap(), 0, size);
+            info = CryptMemAlloc(size);
             ret = CertGetCertificateContextProperty(pCert,
              CERT_KEY_PROV_INFO_PROP_ID, info, &size);
             if (ret)
@@ -1003,9 +1003,10 @@ BOOL WINAPI CryptAcquireCertificatePrivateKey(PCCERT_CONTEXT pCert,
             }
         }
     }
-    HeapFree(GetProcessHeap(), 0, info);
+    CryptMemFree(info);
     if (cert_in_store)
         CertFreeCertificateContext(cert_in_store);
+    if (ret) SetLastError(0);
     return ret;
 }
 
@@ -2619,9 +2620,8 @@ done:
 static BOOL CNG_ImportECCPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HANDLE *key)
 {
     DWORD blob_magic, ecckey_len, size;
-    BCRYPT_ALG_HANDLE alg = NULL;
+    BCRYPT_ALG_HANDLE alg_handle;
     BCRYPT_ECCKEY_BLOB *ecckey;
-    const WCHAR *sign_algo;
     char **ecc_curve;
     NTSTATUS status;
 
@@ -2644,47 +2644,39 @@ static BOOL CNG_ImportECCPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HAN
 
     if (!strcmp(*ecc_curve, szOID_ECC_CURVE_P256))
     {
-        sign_algo = BCRYPT_ECDSA_P256_ALGORITHM;
+        alg_handle = BCRYPT_ECDSA_P256_ALG_HANDLE;
         blob_magic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
     }
     else if (!strcmp(*ecc_curve, szOID_ECC_CURVE_P384))
     {
-        sign_algo = BCRYPT_ECDSA_P384_ALGORITHM;
+        alg_handle = BCRYPT_ECDSA_P384_ALG_HANDLE;
         blob_magic = BCRYPT_ECDSA_PUBLIC_P384_MAGIC;
     }
     else
     {
         FIXME("Unsupported ecc curve type: %s\n", *ecc_curve);
-        sign_algo = NULL;
+        alg_handle = NULL;
         blob_magic = 0;
     }
     LocalFree(ecc_curve);
 
-    if (!sign_algo)
+    if (!alg_handle)
     {
         SetLastError(NTE_BAD_ALGID);
         return FALSE;
     }
 
-    if ((status = BCryptOpenAlgorithmProvider(&alg, sign_algo, NULL, 0)))
-        goto done;
-
     ecckey_len = sizeof(BCRYPT_ECCKEY_BLOB) + pubKeyInfo->PublicKey.cbData - 1;
     if (!(ecckey = CryptMemAlloc(ecckey_len)))
-    {
-        status = STATUS_NO_MEMORY;
-        goto done;
-    }
+        return STATUS_NO_MEMORY;
 
     ecckey->dwMagic = blob_magic;
     ecckey->cbKey = (pubKeyInfo->PublicKey.cbData - 1) / 2;
     memcpy(ecckey + 1, pubKeyInfo->PublicKey.pbData + 1, pubKeyInfo->PublicKey.cbData - 1);
 
-    status = BCryptImportKeyPair(alg, NULL, BCRYPT_ECCPUBLIC_BLOB, key, (BYTE*)ecckey, ecckey_len, 0);
+    status = BCryptImportKeyPair(alg_handle, NULL, BCRYPT_ECCPUBLIC_BLOB, key, (BYTE*)ecckey, ecckey_len, 0);
     CryptMemFree(ecckey);
 
-done:
-    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
     if (status) SetLastError(RtlNtStatusToDosError(status));
     return !status;
 }
@@ -2694,8 +2686,7 @@ static BOOL CNG_ImportRSAPubKey(CERT_PUBLIC_KEY_INFO *info, BCRYPT_KEY_HANDLE *k
     DWORD size, modulus_len, i;
     BLOBHEADER *hdr;
     RSAPUBKEY *rsapubkey;
-    const WCHAR *rsa_algo;
-    BCRYPT_ALG_HANDLE alg = NULL;
+    BCRYPT_ALG_HANDLE alg_handle;
     BCRYPT_RSAKEY_BLOB *rsakey;
     BYTE *s, *d;
     NTSTATUS status;
@@ -2714,19 +2705,16 @@ static BOOL CNG_ImportRSAPubKey(CERT_PUBLIC_KEY_INFO *info, BCRYPT_KEY_HANDLE *k
     }
 
     if (hdr->aiKeyAlg == CALG_RSA_KEYX)
-        rsa_algo = BCRYPT_RSA_ALGORITHM;
+        alg_handle = BCRYPT_RSA_ALG_HANDLE;
     else if (hdr->aiKeyAlg == CALG_RSA_SIGN)
-        rsa_algo = BCRYPT_RSA_SIGN_ALGORITHM;
+        alg_handle = BCRYPT_RSA_SIGN_ALG_HANDLE;
     else
     {
         FIXME("Unsupported RSA algorithm: %#x\n", hdr->aiKeyAlg);
-        CryptMemFree(hdr);
+        LocalFree(hdr);
         SetLastError(NTE_BAD_ALGID);
         return FALSE;
     }
-
-    if ((status = BCryptOpenAlgorithmProvider(&alg, rsa_algo, NULL, 0)))
-        goto done;
 
     rsapubkey = (RSAPUBKEY *)(hdr + 1);
 
@@ -2735,12 +2723,8 @@ static BOOL CNG_ImportRSAPubKey(CERT_PUBLIC_KEY_INFO *info, BCRYPT_KEY_HANDLE *k
         FIXME("RSA pubkey has wrong modulus_len %lu\n", modulus_len);
 
     size = sizeof(*rsakey) + sizeof(ULONG) + modulus_len;
-
     if (!(rsakey = CryptMemAlloc(size)))
-    {
-        status = STATUS_NO_MEMORY;
-        goto done;
-    }
+        return STATUS_NO_MEMORY;
 
     rsakey->Magic = BCRYPT_RSAPUBLIC_MAGIC;
     rsakey->BitLength = rsapubkey->bitlen;
@@ -2758,12 +2742,10 @@ static BOOL CNG_ImportRSAPubKey(CERT_PUBLIC_KEY_INFO *info, BCRYPT_KEY_HANDLE *k
     for (i = 0; i < modulus_len; i++)
         d[i] = s[modulus_len - i - 1];
 
-    status = BCryptImportKeyPair(alg, NULL, BCRYPT_RSAPUBLIC_BLOB, key, (BYTE *)rsakey, size, 0);
+    status = BCryptImportKeyPair(alg_handle, NULL, BCRYPT_RSAPUBLIC_BLOB, key, (BYTE *)rsakey, size, 0);
     CryptMemFree(rsakey);
 
-done:
-    CryptMemFree(hdr);
-    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+    LocalFree(hdr);
     if (status) SetLastError(RtlNtStatusToDosError(status));
     return !status;
 }
@@ -2772,7 +2754,6 @@ BOOL CNG_ImportPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HANDLE *key)
 {
     if (!strcmp(pubKeyInfo->Algorithm.pszObjId, szOID_ECC_PUBLIC_KEY))
         return CNG_ImportECCPubKey(pubKeyInfo, key);
-
 
     if (!strcmp(pubKeyInfo->Algorithm.pszObjId, szOID_RSA_RSA))
         return CNG_ImportRSAPubKey(pubKeyInfo, key);

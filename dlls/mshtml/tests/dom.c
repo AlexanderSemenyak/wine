@@ -27,6 +27,7 @@
 #include "ole2.h"
 #include "mshtml.h"
 #include "mshtmcid.h"
+#include "mshtmdid.h"
 #include "mshtmhst.h"
 #include "docobj.h"
 #include "hlink.h"
@@ -3614,6 +3615,7 @@ static void test_dynamic_properties(IHTMLElement *elem)
 #define test_attr_node_name(a,b) _test_attr_node_name(__LINE__,a,b)
 static void _test_attr_node_name(unsigned line, IHTMLDOMAttribute *attr, const WCHAR *exname)
 {
+    IHTMLDOMAttribute2 *attr2 = _get_attr2_iface(line, (IUnknown*)attr);
     BSTR str;
     HRESULT hres;
 
@@ -3621,6 +3623,13 @@ static void _test_attr_node_name(unsigned line, IHTMLDOMAttribute *attr, const W
     ok_(__FILE__,line)(hres == S_OK, "get_nodeName failed: %08lx\n", hres);
     ok_(__FILE__,line)(!lstrcmpW(str, exname), "node name is %s, expected %s\n", wine_dbgstr_w(str), wine_dbgstr_w(exname));
     SysFreeString(str);
+
+    hres = IHTMLDOMAttribute2_get_name(attr2, &str);
+    ok_(__FILE__,line)(hres == S_OK, "get_name failed: %08lx\n", hres);
+    ok_(__FILE__,line)(!lstrcmpW(str, exname), "name is %s, expected %s\n", wine_dbgstr_w(str), wine_dbgstr_w(exname));
+    SysFreeString(str);
+
+    IHTMLDOMAttribute2_Release(attr2);
 }
 
 #define test_attr_parent(a) _test_attr_parent(__LINE__,a)
@@ -3634,6 +3643,61 @@ static void _test_attr_parent(unsigned line, IHTMLDOMAttribute *attr)
     ok_(__FILE__,line)(hres == S_OK, "get_parentNode failed: %08lx\n", hres);
     ok_(__FILE__,line)(!parent, "parent != NULL\n");
     IHTMLDOMAttribute2_Release(attr2);
+}
+
+static LONG test_attr_collection_attr(IDispatch *attr, LONG i)
+{
+    IHTMLDOMAttribute *dom_attr;
+    LONG ret = 1;
+    HRESULT hres;
+    VARIANT val;
+    BSTR name;
+
+    hres = IDispatch_QueryInterface(attr, &IID_IHTMLDOMAttribute, (void**)&dom_attr);
+    ok(hres == S_OK, "%ld) QueryInterface failed: %08lx\n", i, hres);
+
+    hres = IHTMLDOMAttribute_get_nodeName(dom_attr, &name);
+    ok(hres == S_OK, "%ld) get_nodeName failed: %08lx\n", i, hres);
+
+    if(!lstrcmpW(name, L"id")) {
+        hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
+        ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
+        ok(V_VT(&val) == VT_BSTR, "id: V_VT(&val) = %d\n", V_VT(&val));
+        ok(!lstrcmpW(V_BSTR(&val), L"attr"), "id: V_BSTR(&val) = %s\n", wine_dbgstr_w(V_BSTR(&val)));
+        test_attr_expando(dom_attr, VARIANT_FALSE);
+        test_attr_value(dom_attr, L"attr");
+    } else if(!lstrcmpW(name, L"attr1")) {
+        hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
+        ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
+        ok(V_VT(&val) == VT_BSTR, "attr1: V_VT(&val) = %d\n", V_VT(&val));
+        ok(!lstrcmpW(V_BSTR(&val), L"attr1"), "attr1: V_BSTR(&val) = %s\n", wine_dbgstr_w(V_BSTR(&val)));
+        test_attr_expando(dom_attr, VARIANT_TRUE);
+        test_attr_value(dom_attr, L"attr1");
+    } else if(!lstrcmpW(name, L"attr2")) {
+        hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
+        ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
+        ok(V_VT(&val) == VT_BSTR, "attr2: V_VT(&val) = %d\n", V_VT(&val));
+        ok(!V_BSTR(&val), "attr2: V_BSTR(&val) != NULL\n");
+        test_attr_value(dom_attr, L"");
+    } else if(!lstrcmpW(name, L"attr3")) {
+        hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
+        ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
+        ok(V_VT(&val) == VT_BSTR, "attr3: V_VT(&val) = %d\n", V_VT(&val));
+        ok(!lstrcmpW(V_BSTR(&val), L"attr3"), "attr3: V_BSTR(&val) = %s\n", wine_dbgstr_w(V_BSTR(&val)));
+        test_attr_value(dom_attr, L"attr3");
+    } else if(!lstrcmpW(name, L"test")) {
+        hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
+        ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
+        ok(V_VT(&val) == VT_I4, "test: V_VT(&val) = %d\n", V_VT(&val));
+        ok(V_I4(&val) == 1, "test: V_I4(&val) = %ld\n", V_I4(&val));
+        test_attr_value(dom_attr, L"1");
+    } else
+        ret = 0;
+
+    IHTMLDOMAttribute_Release(dom_attr);
+    SysFreeString(name);
+    VariantClear(&val);
+    return ret;
 }
 
 static void test_attr_collection_disp(IDispatch *disp)
@@ -3689,11 +3753,13 @@ static void test_attr_collection(IHTMLElement *elem)
 
     IHTMLDOMNode *node;
     IDispatch *disp, *attr;
-    IHTMLDOMAttribute *dom_attr;
     IHTMLAttributeCollection *attr_col;
     BSTR name = SysAllocString(testW);
+    IEnumVARIANT *enum_var;
+    IUnknown *enum_unk;
     VARIANT id, val;
     LONG i, len, checked;
+    ULONG fetched;
     HRESULT hres;
 
     hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLDOMNode, (void**)&node);
@@ -3724,6 +3790,13 @@ static void test_attr_collection(IHTMLElement *elem)
     ok(hres == S_OK, "get_length failed: %08lx\n", hres);
     ok(len == i+1, "get_length returned %ld, expected %ld\n", len, i+1);
 
+    hres = IHTMLAttributeCollection_get__newEnum(attr_col, &enum_unk);
+    ok(hres == S_OK, "_newEnum failed: %08lx\n", hres);
+
+    hres = IUnknown_QueryInterface(enum_unk, &IID_IEnumVARIANT, (void**)&enum_var);
+    IUnknown_Release(enum_unk);
+    ok(hres == S_OK, "Could not get IEnumVARIANT iface: %08lx\n", hres);
+
     checked = 0;
     for(i=0; i<len; i++) {
         V_VT(&id) = VT_I4;
@@ -3731,57 +3804,32 @@ static void test_attr_collection(IHTMLElement *elem)
         hres = IHTMLAttributeCollection_item(attr_col, &id, &attr);
         ok(hres == S_OK, "%ld) item failed: %08lx\n", i, hres);
 
-        hres = IDispatch_QueryInterface(attr, &IID_IHTMLDOMAttribute, (void**)&dom_attr);
-        ok(hres == S_OK, "%ld) QueryInterface failed: %08lx\n", i, hres);
+        checked += test_attr_collection_attr(attr, i);
         IDispatch_Release(attr);
-
-        hres = IHTMLDOMAttribute_get_nodeName(dom_attr, &name);
-        ok(hres == S_OK, "%ld) get_nodeName failed: %08lx\n", i, hres);
-
-        if(!lstrcmpW(name, L"id")) {
-            checked++;
-            hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
-            ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
-            ok(V_VT(&val) == VT_BSTR, "id: V_VT(&val) = %d\n", V_VT(&val));
-            ok(!lstrcmpW(V_BSTR(&val), L"attr"), "id: V_BSTR(&val) = %s\n", wine_dbgstr_w(V_BSTR(&val)));
-            test_attr_expando(dom_attr, VARIANT_FALSE);
-            test_attr_value(dom_attr, L"attr");
-        } else if(!lstrcmpW(name, L"attr1")) {
-            checked++;
-            hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
-            ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
-            ok(V_VT(&val) == VT_BSTR, "attr1: V_VT(&val) = %d\n", V_VT(&val));
-            ok(!lstrcmpW(V_BSTR(&val), L"attr1"), "attr1: V_BSTR(&val) = %s\n", wine_dbgstr_w(V_BSTR(&val)));
-            test_attr_expando(dom_attr, VARIANT_TRUE);
-            test_attr_value(dom_attr, L"attr1");
-        } else if(!lstrcmpW(name, L"attr2")) {
-            checked++;
-            hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
-            ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
-            ok(V_VT(&val) == VT_BSTR, "attr2: V_VT(&val) = %d\n", V_VT(&val));
-            ok(!V_BSTR(&val), "attr2: V_BSTR(&val) != NULL\n");
-            test_attr_value(dom_attr, L"");
-        } else if(!lstrcmpW(name, L"attr3")) {
-            checked++;
-            hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
-            ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
-            ok(V_VT(&val) == VT_BSTR, "attr3: V_VT(&val) = %d\n", V_VT(&val));
-            ok(!lstrcmpW(V_BSTR(&val), L"attr3"), "attr3: V_BSTR(&val) = %s\n", wine_dbgstr_w(V_BSTR(&val)));
-            test_attr_value(dom_attr, L"attr3");
-        } else if(!lstrcmpW(name, L"test")) {
-            checked++;
-            hres = IHTMLDOMAttribute_get_nodeValue(dom_attr, &val);
-            ok(hres == S_OK, "%ld) get_nodeValue failed: %08lx\n", i, hres);
-            ok(V_VT(&val) == VT_I4, "test: V_VT(&val) = %d\n", V_VT(&val));
-            ok(V_I4(&val) == 1, "test: V_I4(&val) = %ld\n", V_I4(&val));
-            test_attr_value(dom_attr, L"1");
-        }
-
-        IHTMLDOMAttribute_Release(dom_attr);
-        SysFreeString(name);
-        VariantClear(&val);
     }
     ok(checked==5, "invalid number of specified attributes (%ld)\n", checked);
+
+    checked = 0;
+    for(i=0; i<len; i++) {
+        fetched = 0;
+        V_VT(&val) = VT_ERROR;
+        hres = IEnumVARIANT_Next(enum_var, 1, &val, &fetched);
+        ok(hres == S_OK, "Next failed: %08lx\n", hres);
+        ok(fetched == 1, "fetched = %lu\n", fetched);
+        ok(V_VT(&val) == VT_DISPATCH, "V_VT(val) = %d\n", V_VT(&val));
+        ok(V_DISPATCH(&val) != NULL, "V_DISPATCH(&val) == NULL\n");
+
+        checked += test_attr_collection_attr(V_DISPATCH(&val), i);
+        IDispatch_Release(V_DISPATCH(&val));
+    }
+    ok(checked==5, "invalid number of specified attributes (%ld)\n", checked);
+
+    fetched = 0;
+    V_VT(&val) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &val, &fetched);
+    ok(hres == S_FALSE, "Next failed: %08lx\n", hres);
+    ok(fetched == 0, "fetched = %lu\n", fetched);
+    IEnumVARIANT_Release(enum_var);
 
     V_I4(&id) = len;
     hres = IHTMLAttributeCollection_item(attr_col, &id, &attr);
@@ -3898,6 +3946,7 @@ static void test_contenteditable(IUnknown *unk)
     IHTMLElement3 *elem3 = get_elem3_iface(unk);
     HRESULT hres;
     BSTR str, strDefault;
+    VARIANT_BOOL vbool;
 
     hres = IHTMLElement3_get_contentEditable(elem3, &strDefault);
     ok(hres == S_OK, "get_contentEditable failed: 0x%08lx\n", hres);
@@ -3910,6 +3959,21 @@ static void test_contenteditable(IUnknown *unk)
     ok(hres == S_OK, "get_contentEditable failed: 0x%08lx\n", hres);
     ok(!lstrcmpW(str, L"true"), "Got %s, expected %s\n", wine_dbgstr_w(str), "true");
     SysFreeString(str);
+    hres = IHTMLElement3_get_isContentEditable(elem3, &vbool);
+    ok(hres == S_OK, "get_isContentEditable failed: 0x%08lx\n", hres);
+    ok(vbool == VARIANT_TRUE, "Got %d, expected VARIANT_TRUE\n", vbool);
+
+    str = SysAllocString(L"inherit");
+    hres = IHTMLElement3_put_contentEditable(elem3, str);
+    ok(hres == S_OK, "put_contentEditable(%s) failed: 0x%08lx\n", wine_dbgstr_w(str), hres);
+    SysFreeString(str);
+    hres = IHTMLElement3_get_contentEditable(elem3, &str);
+    ok(hres == S_OK, "get_contentEditable failed: 0x%08lx\n", hres);
+    ok(!lstrcmpW(str, L"inherit"), "Got %s, expected %s\n", wine_dbgstr_w(str), "inherit");
+    SysFreeString(str);
+    hres = IHTMLElement3_get_isContentEditable(elem3, &vbool);
+    ok(hres == S_OK, "get_isContentEditable failed: 0x%08lx\n", hres);
+    ok(vbool == VARIANT_FALSE, "Got %d, expected VARIANT_FALSE\n", vbool);
 
     /* Restore origin contentEditable */
     hres = IHTMLElement3_put_contentEditable(elem3, strDefault);
@@ -5225,12 +5289,107 @@ static void _test_doc_set_title(unsigned line, IHTMLDocument2 *doc, const WCHAR 
     SysFreeString(tmp);
 }
 
+static void test_doc_GetIDsOfNames(IHTMLDocument2 *doc)
+{
+    DISPID dispids[3];
+    HRESULT hres;
+    BSTR bstr[3];
+
+    bstr[0] = SysAllocString(L"createStyleSheet");
+    bstr[1] = SysAllocString(L"bstrHref");
+    bstr[2] = SysAllocString(L"lIndex");
+    dispids[0] = 0;
+    dispids[1] = 0xdead;
+    dispids[2] = 0xbeef;
+    hres = IHTMLDocument2_GetIDsOfNames(doc, &IID_NULL, bstr, 3, 0, dispids);
+    ok(hres == S_OK, "GetIDsOfNames failed: %08lx\n", hres);
+    ok(dispids[0] == DISPID_IHTMLDOCUMENT2_CREATESTYLESHEET, "createStyleSheet dispid = %ld\n", dispids[0]);
+    ok(dispids[1] == 0xdead, "bstrHref dispid = %ld\n", dispids[1]);
+    ok(dispids[2] == 0xbeef, "lIndex dispid = %ld\n", dispids[2]);
+    SysFreeString(bstr[2]);
+    SysFreeString(bstr[1]);
+    SysFreeString(bstr[0]);
+}
+
+static void test_window_GetIDsOfNames(IHTMLWindow2 *window)
+{
+    DISPID dispids[3];
+    HRESULT hres;
+    BSTR bstr[3];
+
+    bstr[0] = SysAllocString(L"showHelp");
+    bstr[1] = SysAllocString(L"helpURL");
+    bstr[2] = SysAllocString(L"helpArg");
+    dispids[0] = 0;
+    dispids[1] = 0xdead;
+    dispids[2] = 0xbeef;
+    hres = IHTMLWindow2_GetIDsOfNames(window, &IID_NULL, bstr, 3, 0, dispids);
+    ok(hres == S_OK, "GetIDsOfNames failed: %08lx\n", hres);
+    ok(dispids[0] == DISPID_IHTMLWINDOW2_SHOWHELP, "showHelp dispid = %ld\n", dispids[0]);
+    ok(dispids[1] == 0xdead, "helpURL dispid = %ld\n", dispids[1]);
+    ok(dispids[2] == 0xbeef, "helpArg dispid = %ld\n", dispids[2]);
+    SysFreeString(bstr[2]);
+    SysFreeString(bstr[1]);
+    SysFreeString(bstr[0]);
+}
+
+static void test_elem_GetIDsOfNames(IHTMLElement *elem)
+{
+    DISPID dispids[3];
+    HRESULT hres;
+    BSTR bstr[3];
+
+    /* IE9+ use something like js proxies even on native and have different dispids */
+    if(compat_mode >= COMPAT_IE9)
+        return;
+
+    bstr[0] = SysAllocString(L"insertAdjacentText");
+    bstr[1] = SysAllocString(L"where");
+    bstr[2] = SysAllocString(L"text");
+    dispids[0] = 0;
+    dispids[1] = 0xdead;
+    dispids[2] = 0xbeef;
+    hres = IHTMLElement_GetIDsOfNames(elem, &IID_NULL, bstr, 3, 0, dispids);
+    ok(hres == S_OK, "GetIDsOfNames failed: %08lx\n", hres);
+    ok(dispids[0] == DISPID_IHTMLELEMENT_INSERTADJACENTTEXT, "insertAdjacentText dispid = %ld\n", dispids[0]);
+    ok(dispids[1] == 0xdead, "where dispid = %ld\n", dispids[1]);
+    ok(dispids[2] == 0xbeef, "text dispid = %ld\n", dispids[2]);
+    SysFreeString(bstr[2]);
+    SysFreeString(bstr[1]);
+    SysFreeString(bstr[0]);
+}
+
+static void test_attr_GetIDsOfNames(IHTMLDOMAttribute *attr)
+{
+    DISPID dispids[3];
+    HRESULT hres;
+    BSTR bstr[3];
+
+    bstr[0] = SysAllocString(L"insertBefore");
+    bstr[1] = SysAllocString(L"newChild");
+    bstr[2] = SysAllocString(L"refChild");
+    dispids[0] = 0;
+    dispids[1] = 0xdead;
+    dispids[2] = 0xbeef;
+    hres = IHTMLDOMAttribute_GetIDsOfNames(attr, &IID_NULL, bstr, 3, 0, dispids);
+    ok(hres == S_OK, "GetIDsOfNames failed: %08lx\n", hres);
+    ok(dispids[0] == DISPID_IHTMLDOMATTRIBUTE2_INSERTBEFORE, "insertBefore dispid = %ld\n", dispids[0]);
+    ok(dispids[1] == 0xdead, "newChild dispid = %ld\n", dispids[1]);
+    ok(dispids[2] == 0xbeef, "refChild dispid = %ld\n", dispids[2]);
+    SysFreeString(bstr[2]);
+    SysFreeString(bstr[1]);
+    SysFreeString(bstr[0]);
+}
+
 static void test_elem_bounding_client_rect(IUnknown *unk)
 {
     IHTMLRectCollection *rects;
     IHTMLRect *rect, *rect2;
+    IEnumVARIANT *enum_var;
     IHTMLElement2 *elem2;
+    IUnknown *enum_unk;
     VARIANT v, index;
+    ULONG fetched;
     LONG l;
     HRESULT hres;
 
@@ -5284,6 +5443,30 @@ static void test_elem_bounding_client_rect(IUnknown *unk)
     ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
     test_disp((IUnknown*)V_DISPATCH(&v), &IID_IHTMLRect, NULL, L"[object]");
     VariantClear(&v);
+
+    hres = IHTMLRectCollection_get__newEnum(rects, &enum_unk);
+    ok(hres == S_OK, "_newEnum failed: %08lx\n", hres);
+
+    hres = IUnknown_QueryInterface(enum_unk, &IID_IEnumVARIANT, (void**)&enum_var);
+    IUnknown_Release(enum_unk);
+    ok(hres == S_OK, "Could not get IEnumVARIANT iface: %08lx\n", hres);
+
+    fetched = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_OK, "Next failed: %08lx\n", hres);
+    ok(fetched == 1, "fetched = %lu\n", fetched);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) != NULL, "V_DISPATCH(&v) == NULL\n");
+    test_disp((IUnknown*)V_DISPATCH(&v), &IID_IHTMLRect, NULL, L"[object]");
+    VariantClear(&v);
+
+    fetched = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_FALSE, "Next failed: %08lx\n", hres);
+    ok(fetched == 0, "fetched = %lu\n", fetched);
+    IEnumVARIANT_Release(enum_var);
 
     IHTMLRectCollection_Release(rects);
     IHTMLElement2_Release(elem2);
@@ -5372,6 +5555,7 @@ static IHTMLElement *get_elem_by_id(IHTMLDocument2 *doc, const WCHAR *id, BOOL e
     elem = get_elem_iface((IUnknown*)disp);
     IDispatch_Release(disp);
 
+    test_elem_GetIDsOfNames(elem);
     return elem;
 }
 
@@ -5392,13 +5576,18 @@ static IHTMLElement *get_doc_elem_by_id(IHTMLDocument2 *doc, const WCHAR *id)
 
     IHTMLDocument3_Release(doc3);
 
+    if(elem)
+        test_elem_GetIDsOfNames(elem);
     return elem;
 }
 
 static void test_select_elem(IHTMLSelectElement *select)
 {
     IDispatch *disp, *disp2;
-    VARIANT name, index;
+    VARIANT name, index, v;
+    IEnumVARIANT *enum_var;
+    IUnknown *enum_unk;
+    ULONG fetched;
     HRESULT hres;
 
     test_select_type(select, L"select-one");
@@ -5468,6 +5657,40 @@ static void test_select_elem(IHTMLSelectElement *select)
     IDispatch_Release(disp2);
     IDispatch_Release(disp);
 
+    hres = IHTMLSelectElement_get__newEnum(select, &enum_unk);
+    ok(hres == S_OK, "_newEnum failed: %08lx\n", hres);
+
+    hres = IUnknown_QueryInterface(enum_unk, &IID_IEnumVARIANT, (void**)&enum_var);
+    IUnknown_Release(enum_unk);
+    ok(hres == S_OK, "Could not get IEnumVARIANT iface: %08lx\n", hres);
+
+    fetched = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_OK, "Next failed: %08lx\n", hres);
+    ok(fetched == 1, "fetched = %lu\n", fetched);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) != NULL, "V_DISPATCH(&v) == NULL\n");
+    test_disp((IUnknown*)V_DISPATCH(&v), &DIID_DispHTMLOptionElement, &CLSID_HTMLOptionElement, NULL);
+    VariantClear(&v);
+
+    fetched = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_OK, "Next failed: %08lx\n", hres);
+    ok(fetched == 1, "fetched = %lu\n", fetched);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) != NULL, "V_DISPATCH(&v) == NULL\n");
+    test_disp((IUnknown*)V_DISPATCH(&v), &DIID_DispHTMLOptionElement, &CLSID_HTMLOptionElement, NULL);
+    VariantClear(&v);
+
+    fetched = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_FALSE, "Next failed: %08lx\n", hres);
+    ok(fetched == 0, "fetched = %lu\n", fetched);
+    IEnumVARIANT_Release(enum_var);
+
     test_select_multiple(select, VARIANT_FALSE);
     test_select_set_multiple(select, VARIANT_TRUE);
     test_select_remove(select);
@@ -5477,7 +5700,10 @@ static void test_form_item(IHTMLElement *elem)
 {
     IHTMLFormElement *form = get_form_iface((IUnknown*)elem);
     IDispatch *disp, *disp2;
-    VARIANT name, index;
+    IEnumVARIANT *enum_var;
+    VARIANT name, index, v;
+    IUnknown *enum_unk;
+    ULONG fetched;
     HRESULT hres;
 
     V_VT(&index) = VT_EMPTY;
@@ -5516,6 +5742,40 @@ static void test_form_item(IHTMLElement *elem)
     ok(iface_cmp((IUnknown*)disp, (IUnknown*)disp2), "disp != disp2\n");
     IDispatch_Release(disp2);
     IDispatch_Release(disp);
+
+    hres = IHTMLFormElement_get__newEnum(form, &enum_unk);
+    ok(hres == S_OK, "_newEnum failed: %08lx\n", hres);
+
+    hres = IUnknown_QueryInterface(enum_unk, &IID_IEnumVARIANT, (void**)&enum_var);
+    IUnknown_Release(enum_unk);
+    ok(hres == S_OK, "Could not get IEnumVARIANT iface: %08lx\n", hres);
+
+    fetched = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_OK, "Next failed: %08lx\n", hres);
+    ok(fetched == 1, "fetched = %lu\n", fetched);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) != NULL, "V_DISPATCH(&v) == NULL\n");
+    test_disp((IUnknown*)V_DISPATCH(&v), &DIID_DispHTMLTextAreaElement, &CLSID_HTMLTextAreaElement, NULL);
+    VariantClear(&v);
+
+    fetched = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_OK, "Next failed: %08lx\n", hres);
+    ok(fetched == 1, "fetched = %lu\n", fetched);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) != NULL, "V_DISPATCH(&v) == NULL\n");
+    test_disp((IUnknown*)V_DISPATCH(&v), &DIID_DispHTMLInputElement, &CLSID_HTMLInputElement, NULL);
+    VariantClear(&v);
+
+    fetched = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_FALSE, "Next failed: %08lx\n", hres);
+    ok(fetched == 0, "fetched = %lu\n", fetched);
+    IEnumVARIANT_Release(enum_var);
 }
 
 static void test_create_option_elem(IHTMLDocument2 *doc)
@@ -6479,6 +6739,11 @@ static void test_navigator(IHTMLDocument2 *doc)
     ok(!lstrcmpW(bstr, buf+8), "appVersion returned %s, expected \"%s\"\n", wine_dbgstr_w(bstr), wine_dbgstr_w(buf+8));
     SysFreeString(bstr);
 
+    hres = IOmNavigator_get_userAgent(navigator, &bstr);
+    ok(hres == S_OK, "get_userAgent failed: %08lx\n", hres);
+    ok(!lstrcmpW(bstr, buf), "userAgent returned %s, expected %s\n", wine_dbgstr_w(bstr), wine_dbgstr_w(buf));
+    SysFreeString(bstr);
+
     hres = UrlMkSetSessionOption(URLMON_OPTION_USERAGENT, buf, lstrlenW(buf), 0);
     ok(hres == S_OK, "UrlMkSetSessionOption failed: %08lx\n", hres);
 
@@ -6685,6 +6950,8 @@ static void test_doc_elem(IHTMLDocument2 *doc)
     HRESULT hres;
     BSTR bstr;
 
+    test_doc_GetIDsOfNames(doc);
+
     hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument3, (void**)&doc3);
     ok(hres == S_OK, "QueryInterface(IID_IHTMLDocument3) failed: %08lx\n", hres);
 
@@ -6706,6 +6973,7 @@ static void test_doc_elem(IHTMLDocument2 *doc)
     owner_doc = get_owner_doc((IUnknown*)elem);
     ok(iface_cmp((IUnknown *)doc_node, (IUnknown *)owner_doc), "doc_node != owner_doc\n");
     IHTMLDocument2_Release(owner_doc);
+    test_doc_GetIDsOfNames(doc_node);
 
     owner_doc = get_owner_doc((IUnknown*)doc_node);
     ok(!owner_doc, "owner_doc = %p\n", owner_doc);
@@ -6989,6 +7257,7 @@ static void test_window(IHTMLDocument2 *doc)
         win_skip("IID_ITravelLogClient not supported\n");
 
     test_disp((IUnknown*)window, &DIID_DispHTMLWindow2, &CLSID_HTMLWindow2, L"[object]");
+    test_window_GetIDsOfNames(window);
 
     hres = IHTMLWindow2_get_document(window, &doc2);
     ok(hres == S_OK, "get_document failed: %08lx\n", hres);
@@ -7169,10 +7438,14 @@ static void test_dom_implementation(IHTMLDocument2 *doc)
     hres = IHTMLDOMImplementation_QueryInterface(dom_implementation, &IID_IHTMLDOMImplementation2,
                                                  (void**)&dom_implementation2);
     if(SUCCEEDED(hres)) {
+        IHTMLSelectionObject *selection;
+        IHTMLFramesCollection2 *frames;
         IHTMLDocument2 *new_document2;
+        IHTMLDocument3 *new_document3;
         IHTMLDocument7 *new_document;
         IHTMLLocation *location;
         IHTMLWindow2 *window;
+        IHTMLElement *elem;
         VARIANT v;
         IDispatch *disp;
 
@@ -7181,6 +7454,7 @@ static void test_dom_implementation(IHTMLDocument2 *doc)
         str = SysAllocString(L"test");
         hres = IHTMLDOMImplementation2_createHTMLDocument(dom_implementation2, str, &new_document);
         ok(hres == S_OK, "createHTMLDocument failed: %08lx\n", hres);
+        SysFreeString(str);
 
         test_disp((IUnknown*)new_document, &DIID_DispHTMLDocument, &CLSID_HTMLDocument, L"[object]");
         test_ifaces((IUnknown*)new_document, doc_node_iids);
@@ -7196,14 +7470,62 @@ static void test_dom_implementation(IHTMLDocument2 *doc)
         hres = IHTMLDocument7_QueryInterface(new_document, &IID_IHTMLDocument2, (void**)&new_document2);
         ok(hres == S_OK, "Could not get IHTMLDocument2 iface: %08lx\n", hres);
 
+        hres = IHTMLDocument7_QueryInterface(new_document, &IID_IHTMLDocument3, (void**)&new_document3);
+        ok(hres == S_OK, "Could not get IHTMLDocument3 iface: %08lx\n", hres);
+
         hres = IHTMLDocument2_get_parentWindow(new_document2, &window);
         ok(hres == E_FAIL, "get_parentWindow returned: %08lx\n", hres);
+
+        hres = IHTMLDocument2_get_readyState(new_document2, &str);
+        ok(hres == S_OK, "get_readyState returned: %08lx\n", hres);
+        ok(!lstrcmpW(str, L"uninitialized"), "readyState = %s\n", wine_dbgstr_w(str));
+        SysFreeString(str);
 
         hres = IHTMLDocument2_get_Script(new_document2, &disp);
         ok(hres == E_PENDING, "get_Script returned: %08lx\n", hres);
 
+        str = SysAllocString(L"test=testval");
+        hres = IHTMLDocument2_put_cookie(new_document2, str);
+        ok(hres == S_OK, "put_cookie returned: %08lx\n", hres);
+        SysFreeString(str);
+
+        hres = IHTMLDocument2_get_cookie(doc, &str);
+        ok(hres == S_OK, "get_cookie returned: %08lx\n", hres);
+        ok(str == NULL, "cookie = %s\n", wine_dbgstr_w(str));
+        SysFreeString(str);
+
+        hres = IHTMLDocument3_get_documentElement(new_document3, &elem);
+        ok(hres == S_OK, "get_documentElement returned: %08lx\n", hres);
+        ok(elem != NULL, "documentElement = NULL\n");
+        IHTMLElement_Release(elem);
+
+        hres = IHTMLDocument2_get_frames(new_document2, &frames);
+        ok(hres == E_NOTIMPL, "get_frames returned: %08lx\n", hres);
+
         hres = IHTMLDocument2_get_location(new_document2, &location);
         ok(hres == E_UNEXPECTED, "get_location returned: %08lx\n", hres);
+
+        hres = IHTMLDocument2_get_selection(new_document2, &selection);
+        ok(hres == S_OK, "get_selection returned: %08lx\n", hres);
+        ok(selection != NULL, "selection = NULL\n");
+        hres = IHTMLSelectionObject_get_type(selection, &str);
+        ok(hres == S_OK, "selection get_type returned: %08lx\n", hres);
+        ok(!lstrcmpW(str, L"None"), "selection type = %s\n", wine_dbgstr_w(str));
+        IHTMLSelectionObject_Release(selection);
+        SysFreeString(str);
+
+        hres = IHTMLDocument2_get_URL(new_document2, &str);
+        ok(hres == S_OK, "get_URL returned: %08lx\n", hres);
+        ok(!lstrcmpW(str, L"about:blank"), "URL = %s\n", wine_dbgstr_w(str));
+        SysFreeString(str);
+
+        str = SysAllocString(L"text/html");
+        V_VT(&v) = VT_ERROR;
+        disp = (IDispatch*)0xdeadbeef;
+        hres = IHTMLDocument2_open(new_document2, str, v, v, v, &disp);
+        ok(hres == E_FAIL, "open returned: %08lx\n", hres);
+        ok(disp == NULL, "disp = %p\n", disp);
+        SysFreeString(str);
 
         memset(&v, 0xcc, sizeof(v));
         hres = IHTMLDocument7_get_onmsthumbnailclick(new_document, &v);
@@ -7212,6 +7534,7 @@ static void test_dom_implementation(IHTMLDocument2 *doc)
         ok((DWORD)(DWORD_PTR)V_DISPATCH(&v) == 0xcccccccc, "got %p\n", V_DISPATCH(&v));
 
         IHTMLDocument2_Release(new_document2);
+        IHTMLDocument3_Release(new_document3);
         IHTMLDocument7_Release(new_document);
         IHTMLDOMImplementation2_Release(dom_implementation2);
     }else {
@@ -8572,7 +8895,10 @@ static void test_stylesheet(IDispatch *disp)
 static void test_stylesheets(IHTMLDocument2 *doc)
 {
     IHTMLStyleSheetsCollection *col = NULL;
+    IEnumVARIANT *enum_var;
+    IUnknown *enum_unk;
     VARIANT idx, res;
+    ULONG fetched;
     LONG len = 0;
     HRESULT hres;
 
@@ -8605,6 +8931,30 @@ static void test_stylesheets(IHTMLDocument2 *doc)
     ok(hres == E_INVALIDARG, "item failed: %08lx, expected E_INVALIDARG\n", hres);
     ok(V_VT(&res) == VT_EMPTY, "V_VT(res) = %d\n", V_VT(&res));
     VariantClear(&res);
+
+    hres = IHTMLStyleSheetsCollection_get__newEnum(col, &enum_unk);
+    ok(hres == S_OK, "_newEnum failed: %08lx\n", hres);
+
+    hres = IUnknown_QueryInterface(enum_unk, &IID_IEnumVARIANT, (void**)&enum_var);
+    IUnknown_Release(enum_unk);
+    ok(hres == S_OK, "Could not get IEnumVARIANT iface: %08lx\n", hres);
+
+    fetched = 0;
+    V_VT(&res) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &res, &fetched);
+    ok(hres == S_OK, "Next failed: %08lx\n", hres);
+    ok(fetched == 1, "fetched = %lu\n", fetched);
+    ok(V_VT(&res) == VT_DISPATCH, "V_VT(res) = %d\n", V_VT(&res));
+    ok(V_DISPATCH(&res) != NULL, "V_DISPATCH(&res) == NULL\n");
+    test_disp2((IUnknown*)V_DISPATCH(&res), &DIID_DispHTMLStyleSheet, &IID_IHTMLStyleSheet, NULL, L"[object]");
+    VariantClear(&res);
+
+    fetched = 0;
+    V_VT(&res) = VT_ERROR;
+    hres = IEnumVARIANT_Next(enum_var, 1, &res, &fetched);
+    ok(hres == S_FALSE, "Next failed: %08lx\n", hres);
+    ok(fetched == 0, "fetched = %lu\n", fetched);
+    IEnumVARIANT_Release(enum_var);
 
     IHTMLStyleSheetsCollection_Release(col);
 }
@@ -9227,10 +9577,37 @@ static void test_elems(IHTMLDocument2 *doc)
     elem = get_doc_elem_by_id(doc, L"objid");
     ok(elem != NULL, "elem == NULL\n");
     if(elem) {
+        IDispatchEx *dispex = get_dispex_iface((IUnknown*)doc);
+        DISPPARAMS dp = { 0 };
+        DISPID dispid;
+        VARIANT var;
+        BSTR name;
+
         test_object_vspace((IUnknown*)elem, 100);
         test_object_name(elem, L"objname");
+
+        name = SysAllocString(L"objname");
+        hres = IDispatchEx_GetDispID(dispex, name, fdexNameCaseSensitive, &dispid);
+        ok(hres == S_OK, "GetDispID(objname) returned: %08lx\n", hres);
+        SysFreeString(name);
+
+        hres = IDispatchEx_Invoke(dispex, dispid, &IID_NULL, 0, DISPATCH_PROPERTYGET, &dp, &var, NULL, NULL);
+        ok(hres == S_OK, "Invoke(objname) failed: %08lx\n", hres);
+        ok(V_VT(&var) == VT_DISPATCH, "VT = %d\n", V_VT(&var));
+        ok(V_DISPATCH(&var) != NULL, "objname = null\n");
+
+        elem2 = get_elem_iface((IUnknown*)V_DISPATCH(&var));
+        IDispatch_Release(V_DISPATCH(&var));
+
+        test_object_vspace((IUnknown*)elem2, 100);
+        test_object_name(elem2, L"objname");
+        todo_wine
+        ok(elem != elem2, "elem == elem2\n");
+        IHTMLElement_Release(elem2);
+
         set_object_name(elem, L"test");
         set_object_name(elem, NULL);
+        IDispatchEx_Release(dispex);
         IHTMLElement_Release(elem);
     }
 
@@ -9244,6 +9621,12 @@ static void test_elems(IHTMLDocument2 *doc)
         test_anchor_href((IUnknown*)elem, L"http://test1:8080/");
         test_anchor_hostname((IUnknown*)elem, L"test1");
         test_anchor_port((IUnknown*)elem, L"8080");
+
+        /* about:blank */
+        test_anchor_put_href((IUnknown*)elem, L"about:blank");
+        test_anchor_href((IUnknown*)elem, L"about:blank");
+        test_anchor_hostname((IUnknown*)elem, NULL);
+        test_anchor_port((IUnknown*)elem, NULL);
 
         /* Restore the href */
         test_anchor_put_href((IUnknown*)elem, L"http://test/");
@@ -9513,6 +9896,7 @@ static void test_attr(IHTMLDocument2 *doc, IHTMLElement *elem)
     test_no_iface((IUnknown*)attr, &IID_IHTMLDOMNode);
     test_attr_specified(attr, VARIANT_TRUE);
     test_attr_parent(attr);
+    test_attr_GetIDsOfNames(attr);
 
     attr2 = get_elem_attr_node((IUnknown*)elem, L"id", TRUE);
     ok(iface_cmp((IUnknown*)attr, (IUnknown*)attr2), "attr != attr2\n");
@@ -10657,6 +11041,37 @@ static void test_docfrag(IHTMLDocument2 *doc)
     IHTMLDocument2_Release(frag);
 }
 
+static void test_about_blank_storage(IHTMLDocument2 *doc)
+{
+    IHTMLStorage *storage;
+    IHTMLWindow6 *window6;
+    IHTMLWindow2 *window;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "get_parentWindow failed: %08lx\n", hres);
+    ok(window != NULL, "window == NULL\n");
+
+    hres = IHTMLWindow2_QueryInterface(window, &IID_IHTMLWindow6, (void**)&window6);
+    IHTMLWindow2_Release(window);
+    if(FAILED(hres)) {
+        win_skip("IHTMLWindow6 not supported\n");
+        return;
+    }
+
+    storage = (IHTMLStorage*)(INT_PTR)0xdeadbeef;
+    hres = IHTMLWindow6_get_sessionStorage(window6, &storage);
+    ok(hres == S_FALSE, "get_sessionStorage failed: %08lx\n", hres);
+    ok(storage == NULL, "session_storage != NULL\n");
+
+    storage = (IHTMLStorage*)(INT_PTR)0xdeadbeef;
+    hres = IHTMLWindow6_get_localStorage(window6, &storage);
+    ok(hres == S_FALSE, "get_localStorage failed: %08lx\n", hres);
+    ok(storage == NULL, "local_storage != NULL\n");
+
+    IHTMLWindow6_Release(window6);
+}
+
 static void check_quirks_mode(IHTMLDocument2 *doc)
 {
     test_compatmode(doc, L"BackCompat");
@@ -11261,6 +11676,26 @@ static void test_document_mode(IHTMLDocument2 *doc2)
 
 static void test_quirks_mode(void)
 {
+    static const struct {
+        const char *str;
+        unsigned expected_mode;
+    } tests[] = {
+        { "9",          9 },
+        { " \t9 ",      9 },
+        { " 5 , 8 , 7", 8 },
+        { " 8 , 7 , 5", 8 },
+        { " 5 , 5 , 7", 7 },
+        { " 5 , 9 , 7", 9 },
+        { " 5, 7,9",    9 },
+        { " 5, 7;9",    7 },
+        { " 5, edge,8", 11 },
+        { " 5, foo,8",  5 },
+        { " 5, 8,foo",  8 },
+        { " 5, ,,7",    5 },
+        { " 5, , ,7",   5 },
+    };
+    unsigned i;
+
     run_domtest("<html></html>", check_quirks_mode);
     run_domtest("<!DOCTYPE html>\n<html></html>", check_strict_mode);
     run_domtest("<!-- comment --><!DOCTYPE html>\n<html></html>", check_quirks_mode);
@@ -11269,18 +11704,20 @@ static void test_quirks_mode(void)
     expected_document_mode = 5;
     run_domtest("<html><body></body></html>", test_document_mode);
 
+    expected_document_mode = 7;
+    run_domtest("<!DOCTYPE html>\n<html></html>", test_document_mode);
+
     if(!is_ie9plus)
         return;
 
-    expected_document_mode = 9;
-    run_domtest("<!DOCTYPE html>\n"
-                "<html>"
-                " <head>"
-                "  <meta http-equiv=\"x-ua-compatible\" content=\"IE=9\" />"
-                " </head>"
-                " <body>"
-                " </body>"
-                "</html>", test_document_mode);
+    for(i = 0; i < ARRAY_SIZE(tests); i++) {
+        char buf[128];
+        expected_document_mode = tests[i].expected_mode;
+        sprintf(buf, "<!DOCTYPE html>\n<html><head>"
+                     " <meta http-equiv=\"x-ua-compatible\" content=\"IE=%s\" />"
+                     "</head><body></body></html>", tests[i].str);
+        run_domtest(buf, test_document_mode);
+    }
 
     expected_document_mode = 8;
     run_domtest("<!DOCTYPE html>\n"
@@ -11292,6 +11729,92 @@ static void test_quirks_mode(void)
                 " <body>"
                 " </body>"
                 "</html>", test_document_mode);
+}
+
+static void test_document_mode_lock(void)
+{
+    IEventTarget *event_target;
+    IPersistStreamInit *init;
+    IHTMLDocument2 *doc;
+    IStream *stream;
+    HRESULT hres;
+    HGLOBAL mem;
+    SIZE_T len;
+    MSG msg;
+
+    notif_doc = doc = create_document();
+    if(!doc)
+        return;
+    doc_complete = FALSE;
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IEventTarget, (void**)&event_target);
+    ok(hres == E_NOINTERFACE, "QueryInterface(IID_IEventTarget) returned %08lx.\n", hres);
+    ok(event_target == NULL, "event_target != NULL\n");
+
+    len = strlen(doc_blank_ie9);
+    mem = GlobalAlloc(0, len);
+    memcpy(mem, doc_blank_ie9, len);
+    hres = CreateStreamOnHGlobal(mem, TRUE, &stream);
+    ok(hres == S_OK, "Failed to create stream: %08lx.\n", hres);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IPersistStreamInit, (void**)&init);
+    ok(hres == S_OK, "QueryInterface(IID_IPersistStreamInit) failed: %08lx.\n", hres);
+
+    IPersistStreamInit_Load(init, stream);
+    IPersistStreamInit_Release(init);
+    IStream_Release(stream);
+
+    set_client_site(doc, TRUE);
+    do_advise((IUnknown*)doc, &IID_IPropertyNotifySink, (IUnknown*)&PropertyNotifySink);
+
+    while(!doc_complete && GetMessageW(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IEventTarget, (void**)&event_target);
+    ok(hres == S_OK, "QueryInterface(IID_IEventTarget) returned %08lx.\n", hres);
+    ok(event_target != NULL, "event_target == NULL\n");
+    IEventTarget_Release(event_target);
+
+    set_client_site(doc, FALSE);
+    IHTMLDocument2_Release(doc);
+}
+
+static void test_custom_user_agent(IHTMLDocument2 *doc)
+{
+    static const WCHAR ua[] = L"1234567890xxxABC";
+    static char ua_ascii[] = "1234567890xxxABC";
+    IOmNavigator *navigator;
+    IHTMLWindow2 *window;
+    HRESULT hres;
+    BSTR bstr;
+
+    /* Set it only first time, to test it doesn't get reset on compat mode change */
+    if(compat_mode == COMPAT_NONE) {
+        hres = UrlMkSetSessionOption(URLMON_OPTION_USERAGENT, ua_ascii, sizeof(ua_ascii), 0);
+        ok(hres == S_OK, "UrlMkSetSessionOption failed: %08lx\n", hres);
+    }
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "parentWidnow failed: %08lx\n", hres);
+
+    hres = IHTMLWindow2_get_navigator(window, &navigator);
+    ok(hres == S_OK, "get_navigator failed: %08lx\n", hres);
+    ok(navigator != NULL, "navigator == NULL\n");
+    IHTMLWindow2_Release(window);
+
+    hres = IOmNavigator_get_appVersion(navigator, &bstr);
+    ok(hres == S_OK, "get_appVersion failed: %08lx\n", hres);
+    ok(!lstrcmpW(bstr, ua+8), "appVersion returned %s, expected %s\n", wine_dbgstr_w(bstr), wine_dbgstr_w(ua+8));
+    SysFreeString(bstr);
+
+    hres = IOmNavigator_get_userAgent(navigator, &bstr);
+    ok(hres == S_OK, "get_userAgent failed: %08lx\n", hres);
+    ok(!lstrcmpW(bstr, ua), "userAgent returned %s, expected %s\n", wine_dbgstr_w(bstr), wine_dbgstr_w(ua));
+    SysFreeString(bstr);
+
+    IOmNavigator_Release(navigator);
 }
 
 static void check_ie(void)
@@ -11334,9 +11857,11 @@ START_TEST(dom)
         run_domtest(elem_test_str, test_elems);
         run_domtest(elem_test2_str, test_elems2);
         run_domtest(doc_blank, test_dom_elements);
+        run_domtest(doc_blank, test_about_blank_storage);
         if(is_ie9plus) {
             compat_mode = COMPAT_IE9;
             run_domtest(doc_blank_ie9, test_dom_elements);
+            run_domtest(doc_blank_ie9, test_about_blank_storage);
             compat_mode = COMPAT_NONE;
         }
         run_domtest(noscript_str, test_noscript);
@@ -11355,6 +11880,17 @@ START_TEST(dom)
     run_domtest(doctype_str, test_doctype);
 
     test_quirks_mode();
+    test_document_mode_lock();
+
+    /* Run this last since it messes with the process-wide user agent */
+    if (winetest_interactive || ! is_ie_hardened()) {
+        run_domtest(doc_blank, test_custom_user_agent);
+        if(is_ie9plus) {
+            compat_mode = COMPAT_IE9;
+            run_domtest(doc_blank_ie9, test_custom_user_agent);
+            compat_mode = COMPAT_NONE;
+        }
+    }
 
     DestroyWindow(container_hwnd);
     CoUninitialize();

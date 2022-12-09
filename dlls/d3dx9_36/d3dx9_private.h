@@ -230,7 +230,8 @@ static inline BOOL is_param_type_sampler(D3DXPARAMETER_TYPE type)
 /* Returns the smallest power of 2 which is greater than or equal to num */
 static inline uint32_t make_pow2(uint32_t num)
 {
-    uint32_t index;
+    DWORD index;
+
     return BitScanReverse(&index, num - 1) ? 1u << (index + 1) : 1;
 }
 
@@ -240,6 +241,7 @@ enum pres_reg_tables
 {
     PRES_REGTAB_IMMED,
     PRES_REGTAB_CONST,
+    PRES_REGTAB_INPUT,
     PRES_REGTAB_OCONST,
     PRES_REGTAB_OBCONST,
     PRES_REGTAB_OICONST,
@@ -318,13 +320,13 @@ struct d3dx_parameter
     void *data;
     D3DXPARAMETER_CLASS class;
     D3DXPARAMETER_TYPE  type;
-    UINT rows;
-    UINT columns;
-    UINT element_count;
-    UINT member_count;
-    DWORD flags;
-    UINT bytes;
-    DWORD object_id;
+    unsigned int rows;
+    unsigned int columns;
+    unsigned int element_count;
+    unsigned int member_count;
+    uint32_t flags;
+    unsigned int bytes;
+    unsigned int object_id;
 
     struct d3dx_parameter *members;
     char *semantic;
@@ -336,7 +338,7 @@ struct d3dx_parameter
 struct d3dx_top_level_parameter
 {
     struct d3dx_parameter param;
-    UINT annotation_count;
+    unsigned int annotation_count;
     struct d3dx_parameter *annotations;
     ULONG64 update_version;
     ULONG64 *version_counter;
@@ -384,14 +386,24 @@ static inline BOOL is_param_dirty(struct d3dx_parameter *param, ULONG64 update_v
     return is_top_level_param_dirty(param->top_level_param, update_version);
 }
 
-struct d3dx_parameter *get_parameter_by_name(struct d3dx_effect *effect,
+struct d3dx_parameters_store
+{
+    struct wine_rb_tree tree;
+    struct d3dx_top_level_parameter *parameters;
+    unsigned int count;
+
+    char *full_name_tmp;
+    unsigned int full_name_tmp_size;
+};
+
+struct d3dx_parameter *get_parameter_by_name(struct d3dx_parameters_store *store,
         struct d3dx_parameter *parameter, const char *name) DECLSPEC_HIDDEN;
 
 #define SET_D3D_STATE_(manager, device, method, args...) (manager ? manager->lpVtbl->method(manager, args) \
         : device->lpVtbl->method(device, args))
 #define SET_D3D_STATE(base_effect, args...) SET_D3D_STATE_(base_effect->manager, base_effect->device, args)
 
-HRESULT d3dx_create_param_eval(struct d3dx_effect *effect, void *byte_code,
+HRESULT d3dx_create_param_eval(struct d3dx_parameters_store *parameters, void *byte_code,
         unsigned int byte_code_size, D3DXPARAMETER_TYPE type,
         struct d3dx_param_eval **peval, ULONG64 *version_counter,
         const char **skip_constants, unsigned int skip_constants_count) DECLSPEC_HIDDEN;

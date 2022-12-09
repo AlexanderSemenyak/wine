@@ -21,6 +21,7 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#define WINE_NO_LONG_TYPES /* temporary */
 
 #include "wined3d_private.h"
 
@@ -360,7 +361,7 @@ static void stateblock_init_lights(struct list *dst_map, const struct list *src_
 
 ULONG CDECL wined3d_stateblock_incref(struct wined3d_stateblock *stateblock)
 {
-    ULONG refcount = InterlockedIncrement(&stateblock->ref);
+    unsigned int refcount = InterlockedIncrement(&stateblock->ref);
 
     TRACE("%p increasing refcount to %u.\n", stateblock, refcount);
 
@@ -577,7 +578,7 @@ void state_cleanup(struct wined3d_state *state)
 
 ULONG CDECL wined3d_stateblock_decref(struct wined3d_stateblock *stateblock)
 {
-    ULONG refcount = InterlockedDecrement(&stateblock->ref);
+    unsigned int refcount = InterlockedDecrement(&stateblock->ref);
 
     TRACE("%p decreasing refcount to %u\n", stateblock, refcount);
 
@@ -1641,7 +1642,7 @@ HRESULT CDECL wined3d_stateblock_get_light(const struct wined3d_stateblock *stat
     return WINED3D_OK;
 }
 
-static void init_default_render_states(DWORD rs[WINEHIGHEST_RENDER_STATE + 1], const struct wined3d_d3d_info *d3d_info)
+static void init_default_render_states(unsigned int rs[WINEHIGHEST_RENDER_STATE + 1], const struct wined3d_d3d_info *d3d_info)
 {
     union
     {
@@ -1979,7 +1980,7 @@ static void stateblock_state_init_default(struct wined3d_stateblock_state *state
 }
 
 void wined3d_stateblock_state_init(struct wined3d_stateblock_state *state,
-        const struct wined3d_device *device, DWORD flags)
+        const struct wined3d_device *device, uint32_t flags)
 {
     unsigned int i;
 

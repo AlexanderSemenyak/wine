@@ -211,7 +211,7 @@ static void vs_1_1_test(void) {
             "vs_1_1\n"
             "def c12, 0, -1, -0.5, 1024\n",
             {0xfffe0101, 0x00000051, 0xa00f000c, 0x00000000, 0xbf800000, 0xbf000000,
-             0x44800000, 0x0000ffff}
+             0x44800000, 0x0000ffff},
         },
         {   /* shader 14: writemasks, swizzles */
             "vs_1_1\n"
@@ -755,11 +755,11 @@ static void vs_2_0_test(void) {
         },
         {   /* shader 22 */
             "vs_2_0\n"
-            "defi i0, -1, 1, 10, 0\n"
+            "defi i0, - 1, 1, 10, 0\n"
             "defi i1, 0, 40, 30, 10\n",
             {0xfffe0200, 0x05000030, 0xf00f0000, 0xffffffff, 0x00000001, 0x0000000a,
              0x00000000, 0x05000030, 0xf00f0001, 0x00000000, 0x00000028, 0x0000001e,
-             0x0000000a, 0x0000ffff}
+             0x0000000a, 0x0000ffff},
         },
         {   /* shader 23 */
             "vs_2_0\n"
@@ -971,7 +971,7 @@ static void ps_2_x_test(void) {
             "defi i1, 0, 40, 30, 10\n",
             {0xffff0201, 0x05000030, 0xf00f0000, 0xffffffff, 0x00000001, 0x0000000a,
              0x00000000, 0x05000030, 0xf00f0001, 0x00000000, 0x00000028, 0x0000001e,
-             0x0000000a, 0x0000ffff}
+             0x0000000a, 0x0000ffff},
         },
         {   /* shader 2 */
             "ps_2_x\n"
@@ -1172,7 +1172,12 @@ static void vs_3_0_test(void) {
             {0xfffe0300, 0x04000002, 0x800f0000, 0x90e42014, 0xf0e40800, 0x80e40002,
              0x0000ffff}
         },
-
+        {   /* shader 15 */
+            "vs.3.0\n"
+            "add r0, v0[aL + 1 + 3], r2\n",
+            {0xfffe0300, 0x04000002, 0x800f0000, 0x90e42004, 0xf0e40800, 0x80e40002,
+             0x0000ffff}
+        },
     };
 
     exec_tests("vs_3_0", tests, ARRAY_SIZE(tests));
@@ -1403,6 +1408,20 @@ static void failure_test(void) {
         /* shader 43: */
         "ps_2_0\n"
         "texm3x3vspec t3, t0\n",
+        /* shader 44: expression in defi not allowed */
+        "vs_2_0\n"
+        "defi i0, -1 - 1, 1, 10, 0\n"
+        "defi i1, 0, 40, 30, 10\n",
+        /* shader 45: '-' not allowed inside relative addressing operands */
+        "vs.3.0\n"
+        "add r0, v0[aL - 3 + 5], r2\n",
+        /* shader 46: float constants in defi */
+        "vs_2_0\n"
+        "defi i0, 1.0, 1.1, 10.2, 0.3\n"
+        "defi i1, 0, 40, 30, 10\n",
+        /* shader 47: double '-' sign */
+        "vs.3.0\n"
+        "defi c0, -1, --1, 0, 0\n",
     };
     HRESULT hr;
     unsigned int i;
@@ -1660,7 +1679,7 @@ static void d3dpreprocess_test(void)
     /* NULL shader test */
     messages = NULL;
     hr = D3DPreprocess(test1, strlen(test1), NULL, defines, NULL, NULL, &messages);
-    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
     if (messages)
     {
         trace("D3DPreprocess messages:\n%s", (char *)ID3D10Blob_GetBufferPointer(messages));
@@ -1671,7 +1690,7 @@ static void d3dpreprocess_test(void)
     shader = NULL;
     messages = NULL;
     hr = D3DPreprocess(quotation_marks_test, strlen(quotation_marks_test), NULL, NULL, NULL, &shader, &messages);
-    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     if (messages)
     {
         trace("D3DPreprocess messages:\n%s", (char *)ID3D10Blob_GetBufferPointer(messages));
@@ -1730,7 +1749,6 @@ static void test_disassemble_shader(void)
     HRESULT hr;
 
     hr = D3DDisassemble(vs_2_0, 0, 0, NULL, &blob);
-    todo_wine
 #if D3D_COMPILER_VERSION >= 46
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 #else
@@ -1738,9 +1756,8 @@ static void test_disassemble_shader(void)
 #endif
 
     hr = D3DDisassemble(vs_2_0, sizeof(vs_2_0), 0, NULL, &blob);
-    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    if (SUCCEEDED(hr))
-        ID3D10Blob_Release(blob);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ID3D10Blob_Release(blob);
 }
 
 START_TEST(asm)

@@ -27,6 +27,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -53,13 +54,31 @@ static inline size_t align(size_t addr, size_t alignment)
 
 #ifdef __GNUC__
 # define VKD3D_NORETURN __attribute__((noreturn))
-# define VKD3D_PRINTF_FUNC(fmt, args) __attribute__((format(printf, fmt, args)))
+# ifdef __MINGW_PRINTF_FORMAT
+#  define VKD3D_PRINTF_FUNC(fmt, args) __attribute__((format(__MINGW_PRINTF_FORMAT, fmt, args)))
+# else
+#  define VKD3D_PRINTF_FUNC(fmt, args) __attribute__((format(printf, fmt, args)))
+# endif
 # define VKD3D_UNUSED __attribute__((unused))
+# define VKD3D_UNREACHABLE __builtin_unreachable()
 #else
 # define VKD3D_NORETURN
 # define VKD3D_PRINTF_FUNC(fmt, args)
 # define VKD3D_UNUSED
+# define VKD3D_UNREACHABLE (void)0
 #endif  /* __GNUC__ */
+
+VKD3D_NORETURN static inline void vkd3d_unreachable_(const char *filename, unsigned int line)
+{
+    fprintf(stderr, "%s:%u: Aborting, reached unreachable code.\n", filename, line);
+    abort();
+}
+
+#ifdef NDEBUG
+#define vkd3d_unreachable() VKD3D_UNREACHABLE
+#else
+#define vkd3d_unreachable() vkd3d_unreachable_(__FILE__, __LINE__)
+#endif
 
 static inline unsigned int vkd3d_popcount(unsigned int v)
 {
@@ -210,6 +229,10 @@ static inline LONG InterlockedIncrement(LONG volatile *x)
 {
     return __sync_add_and_fetch(x, 1);
 }
+static inline LONG64 InterlockedIncrement64(LONG64 volatile *x)
+{
+    return __sync_add_and_fetch(x, 1);
+}
 static inline LONG InterlockedAdd(LONG volatile *x, LONG val)
 {
     return __sync_add_and_fetch(x, val);
@@ -241,5 +264,75 @@ static inline void vkd3d_parse_version(const char *version, int *major, int *min
 }
 
 HRESULT hresult_from_vkd3d_result(int vkd3d_result);
+
+#ifdef _WIN32
+static inline void *vkd3d_dlopen(const char *name)
+{
+    return LoadLibraryA(name);
+}
+
+static inline void *vkd3d_dlsym(void *handle, const char *symbol)
+{
+    return GetProcAddress(handle, symbol);
+}
+
+static inline int vkd3d_dlclose(void *handle)
+{
+    return FreeLibrary(handle);
+}
+
+static inline const char *vkd3d_dlerror(void)
+{
+    unsigned int error = GetLastError();
+    static char message[256];
+
+    if (FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, 0, message, sizeof(message), NULL))
+        return message;
+    sprintf(message, "Unknown error %u.\n", error);
+    return message;
+}
+#elif defined(HAVE_DLFCN_H)
+#include <dlfcn.h>
+
+static inline void *vkd3d_dlopen(const char *name)
+{
+    return dlopen(name, RTLD_NOW);
+}
+
+static inline void *vkd3d_dlsym(void *handle, const char *symbol)
+{
+    return dlsym(handle, symbol);
+}
+
+static inline int vkd3d_dlclose(void *handle)
+{
+    return dlclose(handle);
+}
+
+static inline const char *vkd3d_dlerror(void)
+{
+    return dlerror();
+}
+#else
+static inline void *vkd3d_dlopen(const char *name)
+{
+    return NULL;
+}
+
+static inline void *vkd3d_dlsym(void *handle, const char *symbol)
+{
+    return NULL;
+}
+
+static inline int vkd3d_dlclose(void *handle)
+{
+    return 0;
+}
+
+static inline const char *vkd3d_dlerror(void)
+{
+    return "Not implemented for this platform.\n";
+}
+#endif
 
 #endif  /* __VKD3D_COMMON_H */

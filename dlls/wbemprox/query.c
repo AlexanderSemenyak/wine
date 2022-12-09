@@ -118,22 +118,22 @@ static HRESULT eval_strcmp( UINT op, const WCHAR *lstr, const WCHAR *rstr, LONGL
     switch (op)
     {
     case OP_EQ:
-        *val = !wcscmp( lstr, rstr );
+        *val = !wcsicmp( lstr, rstr );
         break;
     case OP_GT:
-        *val = wcscmp( lstr, rstr ) > 0;
+        *val = wcsicmp( lstr, rstr ) > 0;
         break;
     case OP_LT:
-        *val = wcscmp( lstr, rstr ) < 0;
+        *val = wcsicmp( lstr, rstr ) < 0;
         break;
     case OP_LE:
-        *val = wcscmp( lstr, rstr ) <= 0;
+        *val = wcsicmp( lstr, rstr ) <= 0;
         break;
     case OP_GE:
-        *val = wcscmp( lstr, rstr ) >= 0;
+        *val = wcsicmp( lstr, rstr ) >= 0;
         break;
     case OP_NE:
-        *val = wcscmp( lstr, rstr );
+        *val = wcsicmp( lstr, rstr );
         break;
     case OP_LIKE:
         *val = eval_like( lstr, rstr );
@@ -1298,7 +1298,7 @@ static struct array *to_array( VARIANT *var, CIMTYPE *type )
                 destroy_array( ret, basetype );
                 return NULL;
             }
-            *(WCHAR **)ptr = heap_strdupW( str );
+            *(WCHAR **)ptr = wcsdup( str );
             SysFreeString( str );
             if (!*(WCHAR **)ptr)
             {
@@ -1336,7 +1336,7 @@ HRESULT to_longlong( VARIANT *var, LONGLONG *val, CIMTYPE *type )
         *type = CIM_BOOLEAN;
         break;
     case VT_BSTR:
-        *val = (INT_PTR)heap_strdupW( V_BSTR( var ) );
+        *val = (INT_PTR)wcsdup( V_BSTR( var ) );
         if (!*val) return E_OUTOFMEMORY;
         *type = CIM_STRING;
         break;

@@ -178,7 +178,7 @@ BSTR get_value_bstr( const struct table *table, UINT row, UINT column )
         if (!val) return NULL;
         len = lstrlenW( (const WCHAR *)(INT_PTR)val ) + 2;
         if (!(ret = SysAllocStringLen( NULL, len ))) return NULL;
-        swprintf( ret, len, L"\"%s\"", (const WCHAR *)(INT_PTR)val );
+        swprintf( ret, len + 1, L"\"%s\"", (const WCHAR *)(INT_PTR)val );
         return ret;
 
     case CIM_SINT16:
@@ -376,7 +376,7 @@ struct table *create_table( const WCHAR *name, UINT num_cols, const struct colum
     struct table *table;
 
     if (!(table = malloc( sizeof(*table) ))) return NULL;
-    table->name               = heap_strdupW( name );
+    table->name               = wcsdup( name );
     table->num_cols           = num_cols;
     table->columns            = columns;
     table->num_rows           = num_rows;

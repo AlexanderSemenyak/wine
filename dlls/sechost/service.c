@@ -22,6 +22,7 @@
 
 #define NONAMELESSUNION
 #include <stdarg.h>
+#define WINADVAPI
 #include "windef.h"
 #include "winbase.h"
 #include "winsvc.h"
@@ -1288,6 +1289,8 @@ static DWORD WINAPI notify_thread(void *user)
     SERVICE_NOTIFY_STATUS_CHANGE_PARAMS_2 *cparams;
     BOOL dummy;
 
+    SetThreadDescription(GetCurrentThread(), L"wine_sechost_notify_service_status");
+
     __TRY
     {
         /* GetNotifyResults blocks until there is an event */
@@ -1585,6 +1588,7 @@ static DWORD WINAPI service_thread( void *arg )
     DWORD argc = 0, len = 0;
 
     TRACE("%p\n", arg);
+    SetThreadDescription(GetCurrentThread(), L"wine_sechost_service");
 
     while (str[len])
     {
@@ -2020,6 +2024,8 @@ static DWORD WINAPI device_notify_proc( void *arg )
     DWORD code = 0;
     unsigned int i, size;
     BYTE *buf;
+
+    SetThreadDescription( GetCurrentThread(), L"wine_sechost_device_notify" );
 
     if ((err = RpcStringBindingComposeW( NULL, protseq, NULL, endpoint, NULL, &binding_str )))
     {

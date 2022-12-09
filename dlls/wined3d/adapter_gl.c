@@ -263,7 +263,7 @@ static void wined3d_caps_gl_ctx_destroy(const struct wined3d_caps_gl_ctx *ctx)
 
     if (!wglDeleteContext(ctx->gl_ctx))
     {
-        DWORD err = GetLastError();
+        unsigned int err = GetLastError();
         ERR("wglDeleteContext(%p) failed, last error %#x.\n", ctx->gl_ctx, err);
     }
 
@@ -290,15 +290,15 @@ static BOOL wined3d_caps_gl_ctx_create_attribs(struct wined3d_caps_gl_ctx *caps_
 
     if (!wglMakeCurrent(caps_gl_ctx->dc, new_ctx))
     {
-        ERR("Failed to make new context current, last error %#x.\n", GetLastError());
+        ERR("Failed to make new context current, last error %#lx.\n", GetLastError());
         if (!wglDeleteContext(new_ctx))
-            ERR("Failed to delete new context, last error %#x.\n", GetLastError());
+            ERR("Failed to delete new context, last error %#lx.\n", GetLastError());
         gl_info->p_wglCreateContextAttribsARB = NULL;
         return TRUE;
     }
 
     if (!wglDeleteContext(caps_gl_ctx->gl_ctx))
-        ERR("Failed to delete old context, last error %#x.\n", GetLastError());
+        ERR("Failed to delete old context, last error %#lx.\n", GetLastError());
     caps_gl_ctx->gl_ctx = new_ctx;
 
     return TRUE;
@@ -718,7 +718,7 @@ static BOOL match_broken_arb_fog(const struct wined3d_gl_info *gl_info, struct w
         const char *gl_renderer, enum wined3d_gl_vendor gl_vendor,
         enum wined3d_pci_vendor card_vendor, enum wined3d_pci_device device)
 {
-    DWORD data[4];
+    unsigned int data[4];
     GLuint tex, fbo;
     GLenum status;
     float color[4] = {0.0f, 1.0f, 0.0f, 0.0f};
@@ -1142,7 +1142,7 @@ static void fixup_extensions(struct wined3d_gl_info *gl_info, struct wined3d_cap
     test_pbo_functionality(gl_info);
 }
 
-static DWORD wined3d_parse_gl_version(const char *gl_version)
+static unsigned int wined3d_parse_gl_version(const char *gl_version)
 {
     const char *ptr = gl_version;
     int major, minor;
@@ -1310,6 +1310,8 @@ static const struct wined3d_renderer_table
 cards_nvidia_binary[] =
 {
     /* Direct 3D 11 */
+    {"Tesla T4",                    CARD_NVIDIA_TESLA_T4},
+    {"Ampere A10",                  CARD_NVIDIA_AMPERE_A10},
     {"RTX 2080 Ti",                 CARD_NVIDIA_GEFORCE_RTX2080TI}, /* GeForce 2000 - highend */
     {"RTX 2080",                    CARD_NVIDIA_GEFORCE_RTX2080},   /* GeForce 2000 - highend */
     {"RTX 2070",                    CARD_NVIDIA_GEFORCE_RTX2070},   /* GeForce 2000 - highend */
@@ -2754,12 +2756,6 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     USE_GL_FUNC(glVertexAttribPointer)                         /* OpenGL 2.0 */
 #undef USE_GL_FUNC
 
-#ifndef USE_WIN32_OPENGL
-    /* hack: use the functions directly from the TEB table to bypass the thunks */
-    /* note that we still need the above wglGetProcAddress calls to initialize the table */
-    gl_info->gl_ops.ext = ((struct opengl_funcs *)NtCurrentTeb()->glTable)->ext;
-#endif
-
 #define MAP_GL_FUNCTION(core_func, ext_func)                                          \
         do                                                                            \
         {                                                                             \
@@ -3398,7 +3394,8 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
     };
     const char *gl_vendor_str, *gl_renderer_str, *gl_version_str;
     struct wined3d_gl_info *gl_info = &adapter->gl_info;
-    DWORD gl_version, gl_ext_emul_mask;
+    unsigned int gl_version;
+    DWORD gl_ext_emul_mask;
     const char *WGL_Extensions = NULL;
     enum wined3d_gl_vendor gl_vendor;
     GLint context_profile = 0;
@@ -4267,7 +4264,7 @@ static HRESULT adapter_gl_create_device(struct wined3d *wined3d, const struct wi
     if (FAILED(hr = wined3d_device_init(&device_gl->d, wined3d, adapter->ordinal, device_type, focus_window,
             flags, surface_alignment, levels, level_count, adapter->gl_info.supported, device_parent)))
     {
-        WARN("Failed to initialize device, hr %#x.\n", hr);
+        WARN("Failed to initialize device, hr %#lx.\n", hr);
         heap_free(device_gl);
         return hr;
     }
@@ -4473,7 +4470,7 @@ static BOOL wined3d_check_pixel_format_color(const struct wined3d_pixel_format *
         const struct wined3d_format *format)
 {
     /* Float formats need FBOs. If FBOs are used this function isn't called */
-    if (format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_FLOAT)
+    if (format->attrs & WINED3D_FORMAT_ATTR_FLOAT)
         return FALSE;
 
     /* Probably a RGBA_float or color index mode. */
@@ -4495,7 +4492,7 @@ static BOOL wined3d_check_pixel_format_depth(const struct wined3d_pixel_format *
     BOOL lockable = FALSE;
 
     /* Float formats need FBOs. If FBOs are used this function isn't called */
-    if (format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_FLOAT)
+    if (format->attrs & WINED3D_FORMAT_ATTR_FLOAT)
         return FALSE;
 
     if ((format->id == WINED3DFMT_D16_LOCKABLE) || (format->id == WINED3DFMT_D32_FLOAT))
@@ -4571,7 +4568,7 @@ static HRESULT adapter_gl_init_3d(struct wined3d_device *device)
 
     wined3d_cs_init_object(device->cs, wined3d_device_gl_create_primary_opengl_context_cs, wined3d_device_gl(device));
     wined3d_cs_finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
-    if (!wined3d_swapchain_gl(device->swapchains[0])->context_count)
+    if (!device->context_count)
         return E_FAIL;
 
     return WINED3D_OK;
@@ -4702,7 +4699,7 @@ static HRESULT adapter_gl_create_swapchain(struct wined3d_device *device,
 
     if (FAILED(hr = wined3d_swapchain_gl_init(swapchain_gl, device, desc, state_parent, parent, parent_ops)))
     {
-        WARN("Failed to initialise swapchain, hr %#x.\n", hr);
+        WARN("Failed to initialise swapchain, hr %#lx.\n", hr);
         heap_free(swapchain_gl);
         return hr;
     }
@@ -4736,7 +4733,7 @@ static HRESULT adapter_gl_create_buffer(struct wined3d_device *device,
 
     if (FAILED(hr = wined3d_buffer_gl_init(buffer_gl, device, desc, data, parent, parent_ops)))
     {
-        WARN("Failed to initialise buffer, hr %#x.\n", hr);
+        WARN("Failed to initialise buffer, hr %#lx.\n", hr);
         heap_free(buffer_gl);
         return hr;
     }
@@ -4783,7 +4780,7 @@ static HRESULT adapter_gl_create_texture(struct wined3d_device *device,
     if (FAILED(hr = wined3d_texture_gl_init(texture_gl, device, desc,
             layer_count, level_count, flags, parent, parent_ops)))
     {
-        WARN("Failed to initialise texture, hr %#x.\n", hr);
+        WARN("Failed to initialise texture, hr %#lx.\n", hr);
         heap_free(texture_gl);
         return hr;
     }
@@ -4834,7 +4831,7 @@ static HRESULT adapter_gl_create_rendertarget_view(const struct wined3d_view_des
 
     if (FAILED(hr = wined3d_rendertarget_view_gl_init(view_gl, desc, resource, parent, parent_ops)))
     {
-        WARN("Failed to initialise view, hr %#x.\n", hr);
+        WARN("Failed to initialise view, hr %#lx.\n", hr);
         heap_free(view_gl);
         return hr;
     }
@@ -4938,7 +4935,7 @@ static HRESULT adapter_gl_create_shader_resource_view(const struct wined3d_view_
 
     if (FAILED(hr = wined3d_shader_resource_view_gl_init(view_gl, desc, resource, parent, parent_ops)))
     {
-        WARN("Failed to initialise view, hr %#x.\n", hr);
+        WARN("Failed to initialise view, hr %#lx.\n", hr);
         heap_free(view_gl);
         return hr;
     }
@@ -4983,7 +4980,7 @@ static HRESULT adapter_gl_create_unordered_access_view(const struct wined3d_view
 
     if (FAILED(hr = wined3d_unordered_access_view_gl_init(view_gl, desc, resource, parent, parent_ops)))
     {
-        WARN("Failed to initialise view, hr %#x.\n", hr);
+        WARN("Failed to initialise view, hr %#lx.\n", hr);
         heap_free(view_gl);
         return hr;
     }
@@ -5227,8 +5224,10 @@ static void wined3d_adapter_gl_init_d3d_info(struct wined3d_adapter_gl *adapter_
     d3d_info->scaled_resolve = !!gl_info->supported[EXT_FRAMEBUFFER_MULTISAMPLE_BLIT_SCALED];
     d3d_info->pbo = !!gl_info->supported[ARB_PIXEL_BUFFER_OBJECT];
     d3d_info->subpixel_viewport = gl_info->limits.viewport_subpixel_bits >= 8;
+    d3d_info->fences = wined3d_fence_supported(gl_info);
     d3d_info->feature_level = feature_level_from_caps(gl_info, &shader_caps, &fragment_caps);
     d3d_info->filling_convention_offset = gl_info->filling_convention_offset;
+    d3d_info->persistent_map = !!gl_info->supported[ARB_BUFFER_STORAGE];
 
     if (gl_info->supported[ARB_TEXTURE_MULTISAMPLE])
         d3d_info->multisample_draw_location = WINED3D_LOCATION_TEXTURE_RGB;
@@ -5286,7 +5285,7 @@ end:
 static BOOL wined3d_adapter_gl_init(struct wined3d_adapter_gl *adapter_gl,
         unsigned int ordinal, unsigned int wined3d_creation_flags)
 {
-    static const DWORD supported_gl_versions[] =
+    static const unsigned int supported_gl_versions[] =
     {
         MAKEDWORD_VERSION(4, 4),
         MAKEDWORD_VERSION(3, 2),
@@ -5308,7 +5307,6 @@ static BOOL wined3d_adapter_gl_init(struct wined3d_adapter_gl *adapter_gl,
         return FALSE;
 
     /* Dynamically load all GL core functions */
-#ifdef USE_WIN32_OPENGL
     {
         HMODULE mod_gl = GetModuleHandleA("opengl32.dll");
 #define USE_GL_FUNC(f) gl_info->gl_ops.gl.p_##f = (void *)GetProcAddress(mod_gl, #f);
@@ -5317,17 +5315,6 @@ static BOOL wined3d_adapter_gl_init(struct wined3d_adapter_gl *adapter_gl,
         gl_info->gl_ops.wgl.p_wglSwapBuffers = (void *)GetProcAddress(mod_gl, "wglSwapBuffers");
         gl_info->gl_ops.wgl.p_wglGetPixelFormat = (void *)GetProcAddress(mod_gl, "wglGetPixelFormat");
     }
-#else
-    /* To bypass the opengl32 thunks retrieve functions from the WGL driver instead of opengl32 */
-    {
-        HDC hdc = GetDC( 0 );
-        const struct opengl_funcs *wgl_driver = __wine_get_wgl_driver( hdc, WINE_WGL_DRIVER_VERSION );
-        ReleaseDC( 0, hdc );
-        if (!wgl_driver || wgl_driver == (void *)-1) return FALSE;
-        gl_info->gl_ops.wgl = wgl_driver->wgl;
-        gl_info->gl_ops.gl = wgl_driver->gl;
-    }
-#endif
 
     gl_info->p_glEnableWINE = gl_info->gl_ops.gl.p_glEnable;
     gl_info->p_glDisableWINE = gl_info->gl_ops.gl.p_glDisable;

@@ -728,28 +728,28 @@ const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec )
 }
 
 /* return the stdcall-decorated name for an entry point */
-const char *get_link_name( const ORDDEF *odp )
+const char *get_abi_name( const ORDDEF *odp, const char *name )
 {
     static char *buffer;
     char *ret;
 
-    if (target.cpu != CPU_i386) return odp->link_name;
+    if (target.cpu != CPU_i386) return name;
 
     switch (odp->type)
     {
     case TYPE_STDCALL:
         if (is_pe())
         {
-            if (odp->flags & FLAG_THISCALL) return odp->link_name;
-            if (odp->flags & FLAG_FASTCALL) ret = strmake( "@%s@%u", odp->link_name, get_args_size( odp ));
-            else if (!kill_at) ret = strmake( "%s@%u", odp->link_name, get_args_size( odp ));
-            else return odp->link_name;
+            if (odp->flags & FLAG_THISCALL) return name;
+            if (odp->flags & FLAG_FASTCALL) ret = strmake( "@%s@%u", name, get_args_size( odp ));
+            else if (!kill_at) ret = strmake( "%s@%u", name, get_args_size( odp ));
+            else return name;
         }
         else
         {
-            if (odp->flags & FLAG_THISCALL) ret = strmake( "__thiscall_%s", odp->link_name );
-            else if (odp->flags & FLAG_FASTCALL) ret = strmake( "__fastcall_%s", odp->link_name );
-            else return odp->link_name;
+            if (odp->flags & FLAG_THISCALL) ret = strmake( "__thiscall_%s", name );
+            else if (odp->flags & FLAG_FASTCALL) ret = strmake( "__fastcall_%s", name );
+            else return name;
         }
         break;
 
@@ -758,18 +758,23 @@ const char *get_link_name( const ORDDEF *odp )
         {
             int args = get_args_size( odp );
             if (odp->flags & FLAG_REGISTER) args += get_ptr_size();  /* context argument */
-            ret = strmake( "%s@%u", odp->link_name, args );
+            ret = strmake( "%s@%u", name, args );
         }
-        else return odp->link_name;
+        else return name;
         break;
 
     default:
-        return odp->link_name;
+        return name;
     }
 
     free( buffer );
     buffer = ret;
     return ret;
+}
+
+const char *get_link_name( const ORDDEF *odp )
+{
+    return get_abi_name( odp, odp->link_name );
 }
 
 /*******************************************************************
@@ -979,6 +984,38 @@ void output_rva( const char *format, ... )
     va_end( valist );
 }
 
+/* output an RVA pointer or ordinal for a function thunk */
+void output_thunk_rva( int ordinal, const char *format, ... )
+{
+    if (ordinal == -1)
+    {
+        va_list valist;
+
+        va_start( valist, format );
+        switch (target.platform)
+        {
+        case PLATFORM_MINGW:
+        case PLATFORM_WINDOWS:
+            output( "\t.rva " );
+            vfprintf( output_file, format, valist );
+            fputc( '\n', output_file );
+            if (get_ptr_size() == 8) output( "\t.long 0\n" );
+            break;
+        default:
+            output( "\t%s ", get_asm_ptr_keyword() );
+            vfprintf( output_file, format, valist );
+            output( " - .L__wine_spec_rva_base\n" );
+            break;
+        }
+        va_end( valist );
+    }
+    else
+    {
+        if (get_ptr_size() == 4) output( "\t.long 0x8000%04x\n", ordinal );
+        else output( "\t.quad 0x800000000000%04x\n", ordinal );
+    }
+}
+
 /* output the GNU note for non-exec stack */
 void output_gnu_stack_note(void)
 {
@@ -1016,9 +1053,11 @@ const char *asm_globl( const char *func )
         break;
     case PLATFORM_MINGW:
     case PLATFORM_WINDOWS:
-        buffer = strmake( "\t.globl %s%s\n%s%s:", target.cpu == CPU_i386 ? "_" : "", func,
-                          target.cpu == CPU_i386 ? "_" : "", func );
+    {
+        const char *name = asm_name( func );
+        buffer = strmake( "\t.globl %s\n%s:", name, name );
         break;
+    }
     default:
         buffer = strmake( "\t.globl %s\n\t.hidden %s\n%s:", func, func, func );
         break;

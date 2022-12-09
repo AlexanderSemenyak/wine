@@ -23,7 +23,6 @@
 #include "atlcom.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(atl);
 
@@ -294,7 +293,7 @@ HRESULT WINAPI AtlModuleAddTermFunc(_ATL_MODULE *pM, _ATL_TERMFUNC *pFunc, DWORD
     TRACE("version %04x (%p %p %Id)\n", _ATL_VER, pM, pFunc, dw);
 
     if (_ATL_VER > _ATL_VER_30 || pM->cbSize > ATLVer1Size) {
-        termfunc_elem = HeapAlloc(GetProcessHeap(), 0, sizeof(_ATL_TERMFUNC_ELEM));
+        termfunc_elem = malloc(sizeof(*termfunc_elem));
         termfunc_elem->pFunc = pFunc;
         termfunc_elem->dw = dw;
         termfunc_elem->pNext = pM->m_pTermFuncs;
@@ -320,7 +319,7 @@ void WINAPI AtlCallTermFunc(_ATL_MODULE *pM)
         iter->pFunc(iter->dw);
         tmp = iter;
         iter = iter->pNext;
-        HeapFree(GetProcessHeap(), 0, tmp);
+        free(tmp);
     }
 
     pM->m_pTermFuncs = NULL;
@@ -342,13 +341,13 @@ HRESULT WINAPI AtlLoadTypeLib(HINSTANCE inst, LPCOLESTR lpszIndex,
     TRACE("(%p %s %p %p)\n", inst, debugstr_w(lpszIndex), pbstrPath, ppTypeLib);
 
     index_len = lpszIndex ? lstrlenW(lpszIndex) : 0;
-    path = heap_alloc((MAX_PATH+index_len)*sizeof(WCHAR) + sizeof(L".tlb"));
+    path = malloc((MAX_PATH+index_len)*sizeof(WCHAR) + sizeof(L".tlb"));
     if(!path)
         return E_OUTOFMEMORY;
 
     path_len = GetModuleFileNameW(inst, path, MAX_PATH);
     if(!path_len) {
-        heap_free(path);
+        free(path);
         return HRESULT_FROM_WIN32(GetLastError());
     }
 
@@ -374,7 +373,7 @@ HRESULT WINAPI AtlLoadTypeLib(HINSTANCE inst, LPCOLESTR lpszIndex,
         }
     }
 
-    heap_free(path);
+    free(path);
     if(FAILED(hres))
         return hres;
 
@@ -483,7 +482,7 @@ HRESULT WINAPI AtlComModuleGetClassObject(_ATL_COM_MODULE *pm, REFCLSID rclsid, 
         return E_INVALIDARG;
 
     for(iter = pm->m_ppAutoObjMapFirst; iter < pm->m_ppAutoObjMapLast; iter++) {
-        if(IsEqualCLSID((*iter)->pclsid, rclsid) && (*iter)->pfnGetClassObject) {
+        if(*iter && IsEqualCLSID((*iter)->pclsid, rclsid) && (*iter)->pfnGetClassObject) {
             if(!(*iter)->pCF)
                 hres = (*iter)->pfnGetClassObject((*iter)->pfnCreateInstance, &IID_IUnknown, (void**)&(*iter)->pCF);
             if((*iter)->pCF)
@@ -508,7 +507,7 @@ HRESULT WINAPI AtlComModuleGetClassObject(_ATL_COM_MODULE *pm, REFCLSID rclsid, 
         return E_INVALIDARG;
 
     for(iter = pm->m_ppAutoObjMapFirst; iter < pm->m_ppAutoObjMapLast; iter++) {
-        if(IsEqualCLSID((*iter)->pclsid, rclsid) && (*iter)->pfnGetClassObject) {
+        if(*iter && IsEqualCLSID((*iter)->pclsid, rclsid) && (*iter)->pfnGetClassObject) {
             if(!(*iter)->pCache->pCF)
                 hres = (*iter)->pfnGetClassObject((*iter)->pfnCreateInstance, &IID_IUnknown, (void**)&(*iter)->pCache->pCF);
             if((*iter)->pCache->pCF)
@@ -539,7 +538,7 @@ HRESULT WINAPI AtlComModuleRegisterClassObjects(_ATL_COM_MODULE *module, DWORD c
         return E_INVALIDARG;
 
     for(iter = module->m_ppAutoObjMapFirst; iter < module->m_ppAutoObjMapLast; iter++) {
-        if(!(*iter)->pfnGetClassObject)
+        if(!(*iter) || !(*iter)->pfnGetClassObject)
             continue;
 
         hres = (*iter)->pfnGetClassObject((*iter)->pfnCreateInstance, &IID_IUnknown, (void**)&unk);
@@ -567,7 +566,7 @@ HRESULT WINAPI AtlComModuleRegisterClassObjects(_ATL_COM_MODULE *module, DWORD c
         return E_INVALIDARG;
 
     for(iter = module->m_ppAutoObjMapFirst; iter < module->m_ppAutoObjMapLast; iter++) {
-        if(!(*iter)->pfnGetClassObject)
+        if(!(*iter) || !(*iter)->pfnGetClassObject)
             continue;
 
         hres = (*iter)->pfnGetClassObject((*iter)->pfnCreateInstance, &IID_IUnknown, (void**)&unk);
@@ -599,6 +598,9 @@ HRESULT WINAPI AtlComModuleRevokeClassObjects(_ATL_COM_MODULE *module)
         return E_INVALIDARG;
 
     for(iter = module->m_ppAutoObjMapFirst; iter < module->m_ppAutoObjMapLast; iter++) {
+        if(!(*iter))
+            continue;
+
         hres = CoRevokeClassObject((*iter)->dwRegister);
         if(FAILED(hres))
             return hres;
@@ -618,6 +620,9 @@ HRESULT WINAPI AtlComModuleRevokeClassObjects(_ATL_COM_MODULE *module)
         return E_INVALIDARG;
 
     for(iter = module->m_ppAutoObjMapFirst; iter < module->m_ppAutoObjMapLast; iter++) {
+        if(!(*iter))
+            continue;
+
         hres = CoRevokeClassObject((*iter)->pCache->dwRegister);
         if(FAILED(hres))
             return hres;

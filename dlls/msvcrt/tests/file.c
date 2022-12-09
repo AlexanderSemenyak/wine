@@ -37,6 +37,20 @@
 #include <locale.h>
 #include <winternl.h>
 
+#define WX_OPEN           0x01
+#define WX_ATEOF          0x02
+#define WX_READNL         0x04
+#define WX_PIPE           0x08
+#define WX_DONTINHERIT    0x10
+#define WX_APPEND         0x20
+#define WX_TTY            0x40
+#define WX_TEXT           0x80
+
+#define EF_UTF8           0x01
+#define EF_UTF16          0x02
+#define EF_CRIT_INIT      0x04
+#define EF_UNK_UNICODE    0x08
+
 #define MSVCRT_FD_BLOCK_SIZE 32
 typedef struct {
     HANDLE              handle;
@@ -244,8 +258,21 @@ static void test_readmode( BOOL ascii_mode )
         write (fd, &padbuffer[i], 1);
     write (fd, nlbuffer, strlen(nlbuffer));
     write (fd, outbuffer, sizeof (outbuffer));
+
+    errno = 0xdeadbeef;
+    _doserrno = 0xdeadbeef;
+    ok(read(fd, buffer, 1) == -1, "read succeeded on write-only file\n");
+    ok(errno == EBADF, "errno = %d\n", errno);
+    ok(_doserrno == ERROR_ACCESS_DENIED, "doserrno = %ld\n", _doserrno);
+
     close (fd);
     
+    fd = open ("fdopen.tst", O_RDONLY, _S_IREAD |_S_IWRITE);
+    errno = 0xdeadbeef;
+    ok(dup2(fd, -1) == -1, "dup2(fd, -1) succeeded\n");
+    ok(errno == EBADF, "errno = %d\n", errno);
+    close (fd);
+
     if (ascii_mode) {
         /* Open file in ascii mode */
         fd = open ("fdopen.tst", O_RDONLY);
@@ -290,6 +317,12 @@ static void test_readmode( BOOL ascii_mode )
     ok(l == pl+fp,"line 2 ftell got %ld should be %d in %s\n", l, pl+fp, IOMODE);
     ok(lstrlenA(buffer) == 2+ao,"line 2 fgets got size %d should be %d in %s\n",
      lstrlenA(buffer), 2+ao, IOMODE);
+
+    errno = 0xdeadbeef;
+    _doserrno = 0xdeadbeef;
+    ok(write(fd, buffer, 1) == -1, "read succeeded on write-only file\n");
+    ok(errno == EBADF, "errno = %d\n", errno);
+    ok(_doserrno == ERROR_ACCESS_DENIED, "doserrno = %ld\n", _doserrno);
     
     /* test fread across buffer boundary */
     rewind(file);
@@ -1921,7 +1954,7 @@ static void test_fopen_fclose_fcloseall( void )
     ok(errno == 0xdeadbeef, "errno = %d\n", errno);
     ret = fclose(NULL);
     ok(ret == EOF, "Closing NULL file returned %d\n", ret);
-    ok(errno = EINVAL, "errno = %d\n", errno);
+    ok(errno == EINVAL, "errno = %d\n", errno);
 
     /* testing fcloseall() */
     numclosed = _fcloseall();
@@ -2851,6 +2884,40 @@ static void test_open_hints(void)
     unlink(tempfile);
 }
 
+static void test_ioinfo_flags(void)
+{
+    HANDLE handle;
+    ioinfo *info;
+    char *tempf;
+    int tempfd;
+
+    tempf = _tempnam(".","wne");
+
+    tempfd = _open(tempf, _O_CREAT|_O_TRUNC|_O_WRONLY|_O_WTEXT, _S_IWRITE);
+    ok(tempfd != -1, "_open failed with error: %d\n", errno);
+
+    handle = (HANDLE)_get_osfhandle(tempfd);
+    info = &__pioinfo[tempfd / MSVCRT_FD_BLOCK_SIZE][tempfd % MSVCRT_FD_BLOCK_SIZE];
+    ok(!!info, "NULL info.\n");
+    ok(info->handle == handle, "Unexpected handle %p, expected %p.\n", info->handle, handle);
+    ok(info->exflag == (EF_UTF16 | EF_CRIT_INIT | EF_UNK_UNICODE), "Unexpected exflag %#x.\n", info->exflag);
+    ok(info->wxflag == (WX_TEXT | WX_OPEN), "Unexpected wxflag %#x.\n", info->wxflag);
+
+    close(tempfd);
+
+    ok(info->handle == INVALID_HANDLE_VALUE, "Unexpected handle %p.\n", info->handle);
+    ok(info->exflag == (EF_UTF16 | EF_CRIT_INIT | EF_UNK_UNICODE), "Unexpected exflag %#x.\n", info->exflag);
+    ok(!info->wxflag, "Unexpected wxflag %#x.\n", info->wxflag);
+
+    info = &__pioinfo[(tempfd + 4) / MSVCRT_FD_BLOCK_SIZE][(tempfd + 4) % MSVCRT_FD_BLOCK_SIZE];
+    ok(!!info, "NULL info.\n");
+    ok(info->handle == INVALID_HANDLE_VALUE, "Unexpected handle %p.\n", info->handle);
+    ok(!info->exflag, "Unexpected exflag %#x.\n", info->exflag);
+
+    unlink(tempf);
+    free(tempf);
+}
+
 START_TEST(file)
 {
     int arg_c;
@@ -2925,6 +2992,7 @@ START_TEST(file)
     test_lseek();
     test_fopen_hints();
     test_open_hints();
+    test_ioinfo_flags();
 
     /* Wait for the (_P_NOWAIT) spawned processes to finish to make sure the report
      * file contains lines in the correct order

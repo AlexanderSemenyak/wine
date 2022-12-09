@@ -41,6 +41,15 @@ struct HTMLFormElement {
     nsIDOMHTMLFormElement *nsform;
 };
 
+typedef struct {
+    IEnumVARIANT IEnumVARIANT_iface;
+
+    LONG ref;
+
+    ULONG iter;
+    HTMLFormElement *elem;
+} HTMLFormElementEnum;
+
 HRESULT return_nsform(nsresult nsres, nsIDOMHTMLFormElement *form, IHTMLFormElement **p)
 {
     nsIDOMNode *form_node;
@@ -107,6 +116,135 @@ static HRESULT htmlform_item(HTMLFormElement *This, int i, IDispatch **ret)
 
     return S_OK;
 }
+
+static inline HTMLFormElementEnum *impl_from_IEnumVARIANT(IEnumVARIANT *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLFormElementEnum, IEnumVARIANT_iface);
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_QueryInterface(IEnumVARIANT *iface, REFIID riid, void **ppv)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(riid, &IID_IUnknown)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else if(IsEqualGUID(riid, &IID_IEnumVARIANT)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else {
+        FIXME("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLFormElementEnum_AddRef(IEnumVARIANT *iface)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLFormElementEnum_Release(IEnumVARIANT *iface)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    if(!ref) {
+        IHTMLFormElement_Release(&This->elem->IHTMLFormElement_iface);
+        free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_Next(IEnumVARIANT *iface, ULONG celt, VARIANT *rgVar, ULONG *pCeltFetched)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    nsresult nsres;
+    HRESULT hres;
+    ULONG num, i;
+    LONG len;
+
+    TRACE("(%p)->(%lu %p %p)\n", This, celt, rgVar, pCeltFetched);
+
+    nsres = nsIDOMHTMLFormElement_GetLength(This->elem->nsform, &len);
+    if(NS_FAILED(nsres))
+        return E_FAIL;
+    num = min(len - This->iter, celt);
+
+    for(i = 0; i < num; i++) {
+        hres = htmlform_item(This->elem, This->iter + i, &V_DISPATCH(&rgVar[i]));
+        if(FAILED(hres)) {
+            while(i--)
+                VariantClear(&rgVar[i]);
+            return hres;
+        }
+        V_VT(&rgVar[i]) = VT_DISPATCH;
+    }
+
+    This->iter += num;
+    if(pCeltFetched)
+        *pCeltFetched = num;
+    return num == celt ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_Skip(IEnumVARIANT *iface, ULONG celt)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    nsresult nsres;
+    LONG len;
+
+    TRACE("(%p)->(%lu)\n", This, celt);
+
+    nsres = nsIDOMHTMLFormElement_GetLength(This->elem->nsform, &len);
+    if(NS_FAILED(nsres))
+        return E_FAIL;
+
+    if(This->iter + celt > len) {
+        This->iter = len;
+        return S_FALSE;
+    }
+
+    This->iter += celt;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_Reset(IEnumVARIANT *iface)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->()\n", This);
+
+    This->iter = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_Clone(IEnumVARIANT *iface, IEnumVARIANT **ppEnum)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    FIXME("(%p)->(%p)\n", This, ppEnum);
+    return E_NOTIMPL;
+}
+
+static const IEnumVARIANTVtbl HTMLFormElementEnumVtbl = {
+    HTMLFormElementEnum_QueryInterface,
+    HTMLFormElementEnum_AddRef,
+    HTMLFormElementEnum_Release,
+    HTMLFormElementEnum_Next,
+    HTMLFormElementEnum_Skip,
+    HTMLFormElementEnum_Reset,
+    HTMLFormElementEnum_Clone
+};
 
 static inline HTMLFormElement *impl_from_IHTMLFormElement(IHTMLFormElement *iface)
 {
@@ -545,8 +683,23 @@ static HRESULT WINAPI HTMLFormElement_get_length(IHTMLFormElement *iface, LONG *
 static HRESULT WINAPI HTMLFormElement__newEnum(IHTMLFormElement *iface, IUnknown **p)
 {
     HTMLFormElement *This = impl_from_IHTMLFormElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    HTMLFormElementEnum *ret;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    ret = malloc(sizeof(*ret));
+    if(!ret)
+        return E_OUTOFMEMORY;
+
+    ret->IEnumVARIANT_iface.lpVtbl = &HTMLFormElementEnumVtbl;
+    ret->ref = 1;
+    ret->iter = 0;
+
+    HTMLFormElement_AddRef(&This->IHTMLFormElement_iface);
+    ret->elem = This;
+
+    *p = (IUnknown*)&ret->IEnumVARIANT_iface;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLFormElement_item(IHTMLFormElement *iface, VARIANT name,
@@ -745,6 +898,31 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
     return hres;
 }
 
+static HRESULT HTMLFormElement_dispex_get_name(HTMLDOMNode *iface, DISPID id, BSTR *name)
+{
+    HTMLFormElement *This = impl_from_HTMLDOMNode(iface);
+    DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
+    nsIDOMHTMLCollection *elements;
+    nsresult nsres;
+    UINT32 len = 0;
+    WCHAR buf[11];
+
+    nsres = nsIDOMHTMLFormElement_GetElements(This->nsform, &elements);
+    if(NS_FAILED(nsres))
+        return map_nsresult(nsres);
+
+    nsres = nsIDOMHTMLCollection_GetLength(elements, &len);
+    nsIDOMHTMLCollection_Release(elements);
+    if(NS_FAILED(nsres))
+        return map_nsresult(nsres);
+
+    if(idx >= len)
+        return DISP_E_MEMBERNOTFOUND;
+
+    len = swprintf(buf, ARRAY_SIZE(buf), L"%u", idx);
+    return (*name = SysAllocStringLen(buf, len)) ? S_OK : E_OUTOFMEMORY;
+}
+
 static HRESULT HTMLFormElement_invoke(HTMLDOMNode *iface,
         DISPID id, LCID lcid, WORD flags, DISPPARAMS *params, VARIANT *res,
         EXCEPINFO *ei, IServiceProvider *caller)
@@ -806,6 +984,7 @@ static const NodeImplVtbl HTMLFormElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLFormElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
@@ -814,6 +993,7 @@ static const NodeImplVtbl HTMLFormElementImplVtbl = {
     NULL,
     NULL,
     HTMLFormElement_get_dispid,
+    HTMLFormElement_dispex_get_name,
     HTMLFormElement_invoke,
     NULL,
     HTMLFormElement_traverse,
@@ -839,7 +1019,7 @@ HRESULT HTMLFormElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTM
     HTMLFormElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLFormElement));
+    ret = calloc(1, sizeof(HTMLFormElement));
     if(!ret)
         return E_OUTOFMEMORY;
 

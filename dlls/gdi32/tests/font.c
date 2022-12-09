@@ -965,7 +965,7 @@ static void test_bitmap_font_metrics(void)
 
             SetLastError(0xdeadbeef);
             ret = GetTextCharset(hdc);
-            if (is_CJK() && lf.lfCharSet == ANSI_CHARSET)
+            if ((is_CJK() || expected_cs == 254) && lf.lfCharSet == ANSI_CHARSET)
                 ok(ret == ANSI_CHARSET, "got charset %d, expected ANSI_CHARSETd\n", ret);
             else
                 ok(ret == expected_cs, "got charset %d, expected %d\n", ret, expected_cs);
@@ -2569,6 +2569,98 @@ static BOOL get_glyph_indices(INT charset, UINT code_page, WORD *idx, UINT count
     return TRUE;
 }
 
+static void test_TranslateCharsetInfo(void)
+{
+    static CHARSETINFO tests[] =
+    {
+        { ANSI_CHARSET,        1252,      { {0}, { FS_LATIN1 }}},
+        { EASTEUROPE_CHARSET,  1250,      { {0}, { FS_LATIN2 }}},
+        { RUSSIAN_CHARSET,     1251,      { {0}, { FS_CYRILLIC }}},
+        { GREEK_CHARSET,       1253,      { {0}, { FS_GREEK }}},
+        { TURKISH_CHARSET,     1254,      { {0}, { FS_TURKISH }}},
+        { HEBREW_CHARSET,      1255,      { {0}, { FS_HEBREW }}},
+        { ARABIC_CHARSET,      1256,      { {0}, { FS_ARABIC }}},
+        { BALTIC_CHARSET,      1257,      { {0}, { FS_BALTIC }}},
+        { VIETNAMESE_CHARSET,  1258,      { {0}, { FS_VIETNAMESE }}},
+        { THAI_CHARSET,        874,       { {0}, { FS_THAI }}},
+        { SHIFTJIS_CHARSET,    932,       { {0}, { FS_JISJAPAN }}},
+        { GB2312_CHARSET,      936,       { {0}, { FS_CHINESESIMP }}},
+        { HANGEUL_CHARSET,     949,       { {0}, { FS_WANSUNG }}},
+        { CHINESEBIG5_CHARSET, 950,       { {0}, { FS_CHINESETRAD }}},
+        { JOHAB_CHARSET,       1361,      { {0}, { FS_JOHAB }}},
+        { 254,                 CP_UTF8,   { {0}, { 0x04000000 }}},
+        { SYMBOL_CHARSET,      CP_SYMBOL, { {0}, { FS_SYMBOL }}}
+    };
+    CHARSETINFO csi;
+    DWORD i, j;
+    BOOL ret;
+
+    /* try all codepages */
+    for (i = 0; i < 65536; i++)
+    {
+        memset( &csi, 0xcc, sizeof(csi) );
+        ret = TranslateCharsetInfo( ULongToPtr(i), &csi, TCI_SRCCODEPAGE );
+        if (ret)
+        {
+            for (j = 0; j < ARRAY_SIZE(tests); j++)
+            {
+                if (tests[j].ciACP != i) continue;
+                ok( !memcmp( &csi, &tests[j], sizeof(csi) ),
+                    "%lu: wrong info %u %u %08lx %08lx %08lx %08lx %08lx %08lx\n", i,
+                    csi.ciCharset, csi.ciACP, csi.fs.fsUsb[0], csi.fs.fsUsb[1],
+                    csi.fs.fsUsb[2], csi.fs.fsUsb[3], csi.fs.fsCsb[0], csi.fs.fsCsb[1] );
+                break;
+            }
+            ok( j < ARRAY_SIZE(tests), "%lu: TranslateCharsetInfo succeeded\n", i );
+        }
+        else ok( !ret, "%lu: TranslateCharsetInfo succeeded\n", i );
+    }
+
+    /* try all charsets */
+    for (i = 0; i < 256; i++)
+    {
+        memset( &csi, 0xcc, sizeof(csi) );
+        ret = TranslateCharsetInfo( ULongToPtr(i), &csi, TCI_SRCCHARSET );
+        if (ret)
+        {
+            for (j = 0; j < ARRAY_SIZE(tests); j++)
+            {
+                if (tests[j].ciCharset != i) continue;
+                ok( !memcmp( &csi, &tests[j], sizeof(csi) ),
+                    "%lu: wrong info %u %u %08lx %08lx %08lx %08lx %08lx %08lx\n", i,
+                    csi.ciCharset, csi.ciACP, csi.fs.fsUsb[0], csi.fs.fsUsb[1],
+                    csi.fs.fsUsb[2], csi.fs.fsUsb[3], csi.fs.fsCsb[0], csi.fs.fsCsb[1] );
+                break;
+            }
+            ok( j < ARRAY_SIZE(tests), "%lu: TranslateCharsetInfo succeeded\n", i );
+        }
+        else ok( !ret, "%lu: TranslateCharsetInfo succeeded\n", i );
+    }
+
+    /* try all fontsigs */
+    for (i = 0; i < 64; i++)
+    {
+        DWORD csb[2] = { 0, 0 };
+        csb[i / 32] = 1 << (i % 32);
+        memset( &csi, 0xcc, sizeof(csi) );
+        ret = TranslateCharsetInfo( csb, &csi, TCI_SRCFONTSIG );
+        if (ret)
+        {
+            for (j = 0; j < ARRAY_SIZE(tests); j++)
+            {
+                if (tests[j].fs.fsCsb[0] != csb[0]) continue;
+                ok( !memcmp( &csi, &tests[j], sizeof(csi) ),
+                    "%lu: wrong info %u %u %08lx %08lx %08lx %08lx %08lx %08lx\n", i,
+                    csi.ciCharset, csi.ciACP, csi.fs.fsUsb[0], csi.fs.fsUsb[1],
+                    csi.fs.fsUsb[2], csi.fs.fsUsb[3], csi.fs.fsCsb[0], csi.fs.fsCsb[1] );
+                break;
+            }
+            ok( j < ARRAY_SIZE(tests), "%lu: TranslateCharsetInfo succeeded\n", i );
+        }
+        else ok( !ret, "%lu: TranslateCharsetInfo succeeded\n", i );
+    }
+}
+
 static void test_font_charset(void)
 {
     static struct charset_data
@@ -3595,8 +3687,8 @@ static const LANGID mac_langid_table[] =
     0,                                                       /* TT_MAC_LANGID_RUANDA */
     0,                                                       /* TT_MAC_LANGID_RUNDI */
     0,                                                       /* TT_MAC_LANGID_CHEWA */
-    MAKELANGID(LANG_MALAGASY,SUBLANG_DEFAULT),               /* TT_MAC_LANGID_MALAGASY */
-    MAKELANGID(LANG_ESPERANTO,SUBLANG_DEFAULT),              /* TT_MAC_LANGID_ESPERANTO */
+    0,                                                       /* TT_MAC_LANGID_MALAGASY */
+    0,                                                       /* TT_MAC_LANGID_ESPERANTO */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,       /* 95-111 */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,          /* 112-127 */
     MAKELANGID(LANG_WELSH,SUBLANG_DEFAULT),                  /* TT_MAC_LANGID_WELSH */
@@ -3616,7 +3708,7 @@ static const LANGID mac_langid_table[] =
     MAKELANGID(LANG_BRETON,SUBLANG_DEFAULT),                 /* TT_MAC_LANGID_BRETON */
     MAKELANGID(LANG_INUKTITUT,SUBLANG_DEFAULT),              /* TT_MAC_LANGID_INUKTITUT */
     MAKELANGID(LANG_SCOTTISH_GAELIC,SUBLANG_DEFAULT),        /* TT_MAC_LANGID_SCOTTISH_GAELIC */
-    MAKELANGID(LANG_MANX_GAELIC,SUBLANG_DEFAULT),            /* TT_MAC_LANGID_MANX_GAELIC */
+    0,                                                       /* TT_MAC_LANGID_MANX_GAELIC */
     MAKELANGID(LANG_IRISH,SUBLANG_IRISH_IRELAND),            /* TT_MAC_LANGID_IRISH_GAELIC */
     0,                                                       /* TT_MAC_LANGID_TONGAN */
     0,                                                       /* TT_MAC_LANGID_GREEK_POLYTONIC */
@@ -4010,7 +4102,10 @@ static INT CALLBACK enum_truetype_font_proc(const LOGFONTA *lf, const TEXTMETRIC
 
 static void test_GetTextMetrics(void)
 {
+    HFONT old_hf, hf;
+    TEXTMETRICA tm;
     LOGFONTA lf;
+    BOOL ret;
     HDC hdc;
     INT enumed;
 
@@ -4020,6 +4115,18 @@ static void test_GetTextMetrics(void)
     lf.lfCharSet = DEFAULT_CHARSET;
     enumed = 0;
     EnumFontFamiliesExA(hdc, &lf, enum_truetype_font_proc, (LPARAM)&enumed, 0);
+
+    /* Test a bug triggered by rounding up FreeType ppem */
+    hf = CreateFontA(20, 0, 0, 0, FW_REGULAR, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH,
+                     "Tahoma");
+    ok(hf != NULL, "CreateFontA failed, error %lu\n", GetLastError());
+    old_hf = SelectObject(hdc, hf);
+    ret = GetTextMetricsA(hdc, &tm);
+    ok(ret, "GetTextMetricsA failed, error %lu\n", GetLastError());
+    ok(tm.tmHeight <= 20, "Got unexpected tmHeight %ld\n", tm.tmHeight);
+    SelectObject(hdc, old_hf);
+    DeleteObject(hf);
 
     ReleaseDC(0, hdc);
 }
@@ -6413,7 +6520,7 @@ static void test_max_height(void)
     r = GetTextMetricsA(hdc, &tm1);
     ok(r, "GetTextMetrics failed\n");
     ok(tm1.tmHeight > 0, "expected a positive value, got %ld\n", tm1.tmHeight);
-    ok(tm1.tmAveCharWidth > 0, "expected a positive value, got %ld\n", tm1.tmHeight);
+    ok(tm1.tmAveCharWidth > 0, "expected a positive value, got %ld\n", tm1.tmAveCharWidth);
     DeleteObject(SelectObject(hdc, hfont_old));
 
     /* test the largest value */
@@ -6431,6 +6538,7 @@ static void test_max_height(void)
 
     /* test an invalid value */
     for (i = 0; i < ARRAY_SIZE(invalid_height); i++) {
+        winetest_push_context("height=%ld", invalid_height[i]);
         lf.lfHeight = invalid_height[i];
         hfont = CreateFontIndirectA(&lf);
         hfont_old = SelectObject(hdc, hfont);
@@ -6442,6 +6550,7 @@ static void test_max_height(void)
         ok(tm.tmAveCharWidth == tm1.tmAveCharWidth,
            "expected 1 ppem value (%ld), got %ld\n", tm1.tmAveCharWidth, tm.tmAveCharWidth);
         DeleteObject(SelectObject(hdc, hfont_old));
+        winetest_pop_context();
     }
 
     ReleaseDC(NULL, hdc);
@@ -7685,6 +7794,7 @@ START_TEST(font)
     test_GetOutlineTextMetrics();
     test_GetOutlineTextMetrics_subst();
     test_SetTextJustification();
+    test_TranslateCharsetInfo();
     test_font_charset();
     test_GdiGetCodePage();
     test_GetFontUnicodeRanges();

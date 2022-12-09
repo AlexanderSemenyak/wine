@@ -78,6 +78,16 @@ static NTSTATUS (WINAPI *pNtCompareObjects)(HANDLE,HANDLE);
 #define KEYEDEVENT_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | 0x0003)
 #define DESKTOP_ALL_ACCESS    0x01ff
 
+#define check_unicode_string(a, b) check_unicode_string_(__LINE__, a, b)
+static void check_unicode_string_( int line, const UNICODE_STRING *string, const WCHAR *expect )
+{
+    size_t len = wcslen( expect ) * sizeof(WCHAR);
+
+    ok_(__FILE__, line)( !wcscmp( string->Buffer, expect ), "got string %s\n", debugstr_w( string->Buffer ));
+    ok_(__FILE__, line)( string->Length == len, "got length %u\n", string->Length );
+    ok_(__FILE__, line)( string->MaximumLength == len + sizeof(WCHAR), "got max length %u\n", string->MaximumLength );
+}
+
 static void test_case_sensitive (void)
 {
     NTSTATUS status;
@@ -919,7 +929,6 @@ static void test_name_limits(void)
     for (i = 0; i < 65536 / sizeof(WCHAR); i++) str.Buffer[i + wcslen(registryW)] = 'a';
     str.Length = 0;
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr, 0, NULL, 0, NULL );
-    todo_wine
     ok( status == STATUS_OBJECT_PATH_SYNTAX_BAD, "%u: NtCreateKey failed %lx\n", str.Length, status );
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr2, 0, NULL, 0, NULL );
     ok( status == STATUS_INVALID_HANDLE, "%u: NtCreateKey failed %lx\n", str.Length, status );
@@ -1000,13 +1009,11 @@ static void test_name_limits(void)
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr, 0, NULL, 0, NULL );
     ok( status == STATUS_INVALID_PARAMETER, "%u: NtCreateKey failed %lx\n", str.Length, status );
     status = pNtOpenKey( &ret, GENERIC_ALL, &attr );
-    todo_wine
     ok( status == STATUS_INVALID_PARAMETER, "%u: NtOpenKey failed %lx\n", str.Length, status );
     str.Length = 2000;
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr, 0, NULL, 0, NULL );
     ok( status == STATUS_INVALID_PARAMETER, "%u: NtCreateKey failed %lx\n", str.Length, status );
     status = pNtOpenKey( &ret, GENERIC_ALL, &attr );
-    todo_wine
     ok( status == STATUS_INVALID_PARAMETER, "%u: NtOpenKey failed %lx\n", str.Length, status );
     /* some Windows versions change the error past 2050 chars, others past 4066 chars, some don't */
     str.Length = 5000;
@@ -1017,7 +1024,6 @@ static void test_name_limits(void)
         "%u: NtCreateKey failed %lx\n", str.Length, status );
     ret = (HANDLE)0xdeadbeef;
     status = pNtOpenKey( &ret, GENERIC_ALL, &attr );
-    todo_wine
     ok( status == STATUS_BUFFER_OVERFLOW ||
         status == STATUS_BUFFER_TOO_SMALL ||
         status == STATUS_INVALID_PARAMETER,
@@ -1033,7 +1039,6 @@ static void test_name_limits(void)
     ok( !ret, "handle set %p\n", ret );
     ret = (HANDLE)0xdeadbeef;
     status = pNtOpenKey( &ret, GENERIC_ALL, &attr );
-    todo_wine
     ok( status == STATUS_OBJECT_NAME_INVALID ||
         status == STATUS_BUFFER_OVERFLOW ||
         status == STATUS_BUFFER_TOO_SMALL,
@@ -1042,11 +1047,9 @@ static void test_name_limits(void)
     attr3.RootDirectory = 0;
     attr2.ObjectName = attr3.ObjectName = NULL;
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr2, 0, NULL, 0, NULL );
-    todo_wine
     ok( status == STATUS_ACCESS_VIOLATION || status == STATUS_INVALID_HANDLE /* vista wow64 */,
         "NULL: NtCreateKey failed %lx\n", status );
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr3, 0, NULL, 0, NULL );
-    todo_wine
     ok( status == STATUS_ACCESS_VIOLATION, "NULL: NtCreateKey failed %lx\n", status );
     status = pNtCreateKey( &ret, GENERIC_ALL, NULL, 0, NULL, 0, NULL );
     ok( status == STATUS_ACCESS_VIOLATION, "NULL: NtCreateKey failed %lx\n", status );
@@ -1577,7 +1580,8 @@ static void _test_object_name( unsigned line, HANDLE handle, const WCHAR *expect
     ok_(__FILE__,line)( status == STATUS_SUCCESS, "NtQueryObject failed %lx\n", status );
     ok_(__FILE__,line)( len >= sizeof(OBJECT_NAME_INFORMATION) + str->Length, "unexpected len %lu\n", len );
     todo_wine_if (todo)
-        ok_(__FILE__,line)(compare_unicode_string( str, expected_name ), "wrong name %s\n", debugstr_w( str->Buffer ));
+        ok_(__FILE__,line)(compare_unicode_string( str, expected_name ), "got %s, expected %s\n",
+            debugstr_w(str->Buffer), debugstr_w(expected_name));
 }
 
 static void test_query_object(void)
@@ -1871,6 +1875,15 @@ static void test_query_object(void)
 
     pNtClose( handle );
 
+    handle = CreateFileA( "\\\\.\\pipe\\", 0, 0, NULL, OPEN_EXISTING, 0, 0 );
+    ok( handle != INVALID_HANDLE_VALUE, "CreateFile failed (%lu)\n", GetLastError() );
+
+    test_object_name( handle, L"\\Device\\NamedPipe\\", TRUE );
+    test_object_type( handle, L"File" );
+    test_file_info( handle );
+
+    pNtClose( handle );
+
     RtlInitUnicodeString( &path, L"\\REGISTRY\\Machine" );
     status = pNtCreateKey( &handle, KEY_READ, &attr, 0, 0, 0, 0 );
     ok( status == STATUS_SUCCESS, "NtCreateKey failed status %lx\n", status );
@@ -2066,7 +2079,7 @@ static void test_token(void)
     status = pNtOpenThreadToken( GetCurrentThread(), TOKEN_ALL_ACCESS, TRUE, (HANDLE *)0xdeadbee0 );
     ok( status == STATUS_ACCESS_VIOLATION, "NtOpenProcessToken failed: %lx\n", status);
     handle = (HANDLE)0xdeadbeef;
-    status = NtOpenProcessToken( (HANDLE)0xdead, TOKEN_ALL_ACCESS, &handle );
+    status = pNtOpenProcessToken( (HANDLE)0xdead, TOKEN_ALL_ACCESS, &handle );
     ok( status == STATUS_INVALID_HANDLE, "NtOpenProcessToken failed: %lx\n", status);
     ok( !handle || broken(handle == (HANDLE)0xdeadbeef) /* vista */, "handle set %p\n", handle );
     handle = (HANDLE)0xdeadbeef;
@@ -2500,6 +2513,562 @@ static void test_object_identity(void)
     pNtClose( h1 );
 }
 
+static void test_query_directory(void)
+{
+    static const DIRECTORY_BASIC_INFORMATION empty_info;
+    char buffer[200];
+    DIRECTORY_BASIC_INFORMATION *info = (void *)buffer;
+    ULONG context, size, needed_size;
+    const WCHAR *name1, *name2;
+    HANDLE dir, child1, child2;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING string;
+    NTSTATUS status;
+
+    RtlInitUnicodeString( &string, L"\\BaseNamedObjects\\winetest" );
+    InitializeObjectAttributes( &attr, &string, 0, 0, NULL );
+    status = pNtCreateDirectoryObject( &dir, DIRECTORY_QUERY, &attr );
+    ok( !status, "got %#lx\n", status );
+
+    context = 0xdeadbeef;
+    size = 0xdeadbeef;
+    status = NtQueryDirectoryObject( dir, info, 0, TRUE, TRUE, &context, &size );
+    ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
+    ok( context == 0xdeadbeef, "got context %#lx\n", context );
+    ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+
+    context = 0xdeadbeef;
+    size = 0xdeadbeef;
+    status = NtQueryDirectoryObject( dir, info, 0, FALSE, TRUE, &context, &size );
+    todo_wine ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
+    ok( context == 0xdeadbeef, "got context %#lx\n", context );
+    todo_wine ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+
+    context = 0xdeadbeef;
+    size = 0xdeadbeef;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, TRUE, &context, &size );
+    ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
+    ok( context == 0xdeadbeef, "got context %#lx\n", context );
+    ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+    if (size == sizeof(*info))
+        ok( !memcmp( &info[0], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+
+    context = 0xdeadbeef;
+    size = 0xdeadbeef;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), FALSE, TRUE, &context, &size );
+    todo_wine ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
+    ok( context == 0xdeadbeef, "got context %#lx\n", context );
+    todo_wine ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+    if (size == sizeof(*info))
+        ok( !memcmp( &info[0], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+
+    RtlInitUnicodeString( &string, L"\\BaseNamedObjects\\winetest\\Telamon" );
+    status = NtCreateMutant( &child1, GENERIC_ALL, &attr, FALSE );
+    ok( !status, "got %#lx\n", status );
+
+    RtlInitUnicodeString( &string, L"\\BaseNamedObjects\\winetest\\Oileus" );
+    status = NtCreateMutant( &child2, GENERIC_ALL, &attr, FALSE );
+    ok( !status, "got %#lx\n", status );
+
+    context = 0xdeadbeef;
+    size = 0xdeadbeef;
+    status = NtQueryDirectoryObject( NULL, info, sizeof(buffer), TRUE, TRUE, &context, &size );
+    ok( status == STATUS_INVALID_HANDLE, "got %#lx\n", status );
+    ok( context == 0xdeadbeef, "got context %#lx\n", context );
+    ok( size == 0xdeadbeef || broken(!size) /* WoW64 */, "got size %lu\n", size);
+
+    size = 0xdeadbeef;
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, TRUE, NULL, &size );
+    ok( status == STATUS_ACCESS_VIOLATION, "got %#lx\n", status );
+    ok( size == 0xdeadbeef, "got size %lu\n", size);
+
+    context = 0xdeadbeef;
+    size = 0xdeadbeef;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, TRUE, &context, &size );
+    ok( !status, "got %#lx\n", status );
+    ok( context == 1, "got context %#lx\n", context );
+    ok( size && size < sizeof(buffer), "got size %lu\n", size );
+    if (!wcscmp( info[0].ObjectName.Buffer, L"Oileus" ))
+    {
+        name1 = L"Oileus";
+        name2 = L"Telamon";
+    }
+    else
+    {
+        name1 = L"Telamon";
+        name2 = L"Oileus";
+    }
+    check_unicode_string( &info[0].ObjectName, name1 );
+    check_unicode_string( &info[0].ObjectTypeName, L"Mutant" );
+    ok( !memcmp( &info[1], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, FALSE, &context, &size );
+    ok( !status, "got %#lx\n", status );
+    ok( context == 2, "got context %#lx\n", context );
+    check_unicode_string( &info[0].ObjectName, name2 );
+    check_unicode_string( &info[0].ObjectTypeName, L"Mutant" );
+    ok( !memcmp( &info[1], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+
+    size = 0xdeadbeef;
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, FALSE, &context, &size );
+    ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
+    ok( context == 2, "got context %#lx\n", context );
+    ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, TRUE, &context, &size );
+    ok( !status, "got %#lx\n", status );
+    ok( context == 1, "got context %#lx\n", context );
+    check_unicode_string( &info[0].ObjectName, name1 );
+    check_unicode_string( &info[0].ObjectTypeName, L"Mutant" );
+    ok( !memcmp( &info[1], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+
+    needed_size = size;
+
+    size = 0xdeadbeef;
+    context = 0xdeadbeef;
+    status = NtQueryDirectoryObject( dir, info, 0, TRUE, TRUE, &context, &size );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "got %#lx\n", status );
+    ok( context == 0xdeadbeef, "got context %#lx\n", context );
+    ok( size == needed_size, "expected size %lu, got %lu\n", needed_size, size );
+
+    size = 0xdeadbeef;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, needed_size - 1, TRUE, TRUE, &context, &size );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "got %#lx\n", status );
+    ok( size == needed_size, "expected size %lu, got %lu\n", needed_size, size );
+
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, TRUE, &context, NULL );
+    ok( !status, "got %#lx\n", status );
+
+    context = 0;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, FALSE, &context, &size );
+    ok( !status, "got %#lx\n", status );
+    ok( context == 1, "got context %#lx\n", context );
+    check_unicode_string( &info[0].ObjectName, name1 );
+    check_unicode_string( &info[0].ObjectTypeName, L"Mutant" );
+    ok( !memcmp( &info[1], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), FALSE, TRUE, &context, &size );
+    todo_wine ok( !status, "got %#lx\n", status );
+    if (!status)
+    {
+        ok( context == 2, "got context %#lx\n", context );
+        check_unicode_string( &info[0].ObjectName, name1 );
+        check_unicode_string( &info[0].ObjectTypeName, L"Mutant" );
+        check_unicode_string( &info[1].ObjectName, name2 );
+        check_unicode_string( &info[1].ObjectTypeName, L"Mutant" );
+        ok( !memcmp( &info[2], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+    }
+
+    needed_size = size;
+    size = 0xdeadbeef;
+    context = 0xdeadbeef;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, needed_size - 1, FALSE, TRUE, &context, &size );
+    todo_wine ok( status == STATUS_MORE_ENTRIES, "got %#lx\n", status );
+    if (status == STATUS_MORE_ENTRIES)
+    {
+        ok( context == 1, "got context %#lx\n", context );
+        ok( size > 0 && size < needed_size, "got size %lu\n", size );
+        check_unicode_string( &info[0].ObjectName, name1 );
+        check_unicode_string( &info[0].ObjectTypeName, L"Mutant" );
+        ok( !memcmp( &info[1], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+    }
+
+    size = 0xdeadbeef;
+    context = 0xdeadbeef;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(*info), FALSE, TRUE, &context, &size );
+    todo_wine ok( status == STATUS_MORE_ENTRIES
+            || broken(status == STATUS_BUFFER_TOO_SMALL) /* wow64 */, "got %#lx\n", status );
+    if (status == STATUS_MORE_ENTRIES)
+    {
+        ok( !context, "got context %#lx\n", context );
+        ok( size == sizeof(*info), "got size %lu\n", size );
+        ok( !memcmp( &info[0], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+    }
+
+    size = 0xdeadbeef;
+    context = 0xdeadbeef;
+    status = NtQueryDirectoryObject( dir, info, 0, FALSE, TRUE, &context, &size );
+    todo_wine ok( status == STATUS_MORE_ENTRIES
+            || broken(status == STATUS_BUFFER_TOO_SMALL) /* wow64 */, "got %#lx\n", status );
+    if (status == STATUS_MORE_ENTRIES)
+    {
+        ok( !context, "got context %#lx\n", context );
+        ok( size == sizeof(*info), "got size %lu\n", size );
+    }
+
+    context = 1;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = NtQueryDirectoryObject( dir, info, sizeof(buffer), FALSE, FALSE, &context, &size );
+    todo_wine ok( !status, "got %#lx\n", status );
+    if (!status)
+    {
+        ok( context == 2, "got context %#lx\n", context );
+        check_unicode_string( &info[0].ObjectName, name2 );
+        check_unicode_string( &info[0].ObjectTypeName, L"Mutant" );
+        ok( !memcmp( &info[1], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
+    }
+
+    pNtClose( child1 );
+    pNtClose( child2 );
+    pNtClose( dir );
+}
+
+#define test_object_name_with_null(a,b) _test_object_name_with_null(__LINE__,a,b)
+static void _test_object_name_with_null(unsigned line, HANDLE handle, UNICODE_STRING *expect)
+{
+    char buffer[1024];
+    UNICODE_STRING *str = (UNICODE_STRING *)buffer;
+    ULONG len = 0;
+    NTSTATUS status;
+
+    memset(buffer, 0, sizeof(buffer));
+    status = pNtQueryObject(handle, ObjectNameInformation, buffer, sizeof(buffer), &len);
+    ok_(__FILE__,line)(status == STATUS_SUCCESS, "got %08lx\n", status);
+    ok_(__FILE__,line)(len >= sizeof(OBJECT_NAME_INFORMATION) + str->Length, "got %lu\n", len);
+    ok_(__FILE__,line)(str->Length == expect->Length, "got %u, expected %u\n", str->Length, expect->Length);
+    ok_(__FILE__,line)(!wcsnicmp(str->Buffer, expect->Buffer, str->Length/sizeof(WCHAR)), "got %s, expected %s\n",
+        debugstr_w(str->Buffer), debugstr_w(expect->Buffer));
+}
+
+static void test_null_in_object_name(void)
+{
+    WCHAR name[256], name3[256], *p, *name_exp, *name3_exp;
+    HANDLE handle, handle2;
+    NTSTATUS status;
+    OBJECT_ATTRIBUTES attr, attr2, attr3;
+    UNICODE_STRING nameU, name2U, name3U, name2U_exp, name3U_exp;
+    LARGE_INTEGER size;
+#ifndef _WIN64
+    BOOL is_wow64 = FALSE;
+#endif
+
+    trace("running as %d bit\n", (int)sizeof(void *) * 8);
+
+    swprintf(name, ARRAY_SIZE(name), L"\\Sessions\\%u\\BaseNamedObjects\\wine_test", NtCurrentTeb()->Peb->SessionId);
+    swprintf(name3, ARRAY_SIZE(name3), L"\\Sessions\\%u\\BaseNamedObjects\\wine_test", NtCurrentTeb()->Peb->SessionId);
+    p = wcsrchr(name3, '\\');
+    p[5] = 0; /* => \\wine\0test */
+
+    RtlInitUnicodeString(&nameU, name);
+    InitializeObjectAttributes(&attr, &nameU, 0, 0, NULL);
+
+    name2U = nameU;
+    name2U.Length += sizeof(WCHAR); /* add terminating \0 to string length */
+    InitializeObjectAttributes(&attr2, &name2U, 0, 0, NULL);
+
+    name3U = nameU;
+    name3U.Buffer = name3;
+    InitializeObjectAttributes(&attr3, &name3U, 0, 0, NULL);
+
+    status = pNtCreateEvent(&handle, GENERIC_ALL, &attr, NotificationEvent, FALSE);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    status = pNtOpenEvent(&handle2, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle2, name, FALSE);
+    pNtClose(handle2);
+    status = pNtOpenEvent(&handle2, GENERIC_ALL, &attr2);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+    pNtClose(handle);
+    status = pNtCreateEvent(&handle, GENERIC_ALL, &attr2, NotificationEvent, FALSE);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    status = pNtOpenEvent(&handle2, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name2U);
+    pNtClose(handle2);
+    status = pNtOpenEvent(&handle2, GENERIC_ALL, &attr);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+    pNtClose(handle);
+    status = pNtCreateEvent(&handle, GENERIC_ALL, &attr3, NotificationEvent, FALSE);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    status = pNtOpenEvent(&handle2, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name3U);
+    pNtClose(handle2);
+    pNtClose(handle);
+
+    status = pNtCreateDebugObject(&handle, GENERIC_ALL, &attr, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    pNtClose(handle);
+    status = pNtCreateDebugObject(&handle, GENERIC_ALL, &attr2, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    pNtClose(handle);
+    status = pNtCreateDebugObject(&handle, GENERIC_ALL, &attr3, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    pNtClose(handle);
+
+    status = pNtCreateMutant(&handle, GENERIC_ALL, &attr, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    status = pNtOpenMutant(&handle2, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle2, name, FALSE);
+    pNtClose(handle2);
+    status = pNtOpenMutant(&handle2, GENERIC_ALL, &attr2);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+    pNtClose(handle);
+    status = pNtCreateMutant(&handle, GENERIC_ALL, &attr2, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    status = pNtOpenMutant(&handle2, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name2U);
+    pNtClose(handle2);
+    status = pNtOpenMutant(&handle2, GENERIC_ALL, &attr);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+    pNtClose(handle);
+    status = pNtCreateMutant(&handle, GENERIC_ALL, &attr3, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    status = pNtOpenMutant(&handle2, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name3U);
+    pNtClose(handle2);
+    pNtClose(handle);
+
+    status = pNtCreateSemaphore(&handle, GENERIC_ALL, &attr, 1, 2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    status = pNtOpenSemaphore(&handle2, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle2, name, FALSE);
+    pNtClose(handle2);
+    status = pNtOpenSemaphore(&handle2, GENERIC_ALL, &attr2);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+    pNtClose(handle);
+    status = pNtCreateSemaphore(&handle, GENERIC_ALL, &attr2, 1, 2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    status = pNtOpenSemaphore(&handle2, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name2U);
+    pNtClose(handle2);
+    status = pNtOpenSemaphore(&handle2, GENERIC_ALL, &attr);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+    pNtClose(handle);
+    status = pNtCreateSemaphore(&handle, GENERIC_ALL, &attr3, 1, 2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    status = pNtOpenSemaphore(&handle2, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name3U);
+    pNtClose(handle2);
+    pNtClose(handle);
+
+    status = pNtCreateKeyedEvent(&handle, GENERIC_ALL, &attr, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    status = pNtOpenKeyedEvent(&handle2, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle2, name, FALSE);
+    pNtClose(handle2);
+    status = pNtOpenKeyedEvent(&handle2, GENERIC_ALL, &attr2);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+    pNtClose(handle);
+    status = pNtCreateKeyedEvent(&handle, GENERIC_ALL, &attr2, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    status = pNtOpenKeyedEvent(&handle2, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name2U);
+    pNtClose(handle2);
+    status = pNtOpenKeyedEvent(&handle2, GENERIC_ALL, &attr);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+    pNtClose(handle);
+    status = pNtCreateKeyedEvent(&handle, GENERIC_ALL, &attr3, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    status = pNtOpenKeyedEvent(&handle2, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name3U);
+    pNtClose(handle2);
+    pNtClose(handle);
+
+    status = pNtCreateIoCompletion(&handle, GENERIC_ALL, &attr, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    status = pNtOpenIoCompletion(&handle2, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle2, name, FALSE);
+    pNtClose(handle2);
+    pNtClose(handle);
+    status = pNtCreateIoCompletion(&handle, GENERIC_ALL, &attr2, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    status = pNtOpenIoCompletion(&handle2, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name2U);
+    pNtClose(handle2);
+    pNtClose(handle);
+    status = pNtCreateIoCompletion(&handle, GENERIC_ALL, &attr3, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    status = pNtOpenIoCompletion(&handle2, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name3U);
+    pNtClose(handle2);
+    pNtClose(handle);
+
+    status = pNtCreateJobObject(&handle, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    status = pNtOpenJobObject(&handle2, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle2, name, FALSE);
+    pNtClose(handle2);
+    pNtClose(handle);
+    status = pNtCreateJobObject(&handle, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    status = pNtOpenJobObject(&handle2, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name2U);
+    pNtClose(handle2);
+    pNtClose(handle);
+    status = pNtCreateJobObject(&handle, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    status = pNtOpenJobObject(&handle2, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name3U);
+    pNtClose(handle2);
+    pNtClose(handle);
+
+    status = pNtCreateTimer(&handle, GENERIC_ALL, &attr, NotificationTimer);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    status = pNtOpenTimer(&handle2, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle2, name, FALSE);
+    pNtClose(handle2);
+    pNtClose(handle);
+    status = pNtCreateTimer(&handle, GENERIC_ALL, &attr2, NotificationTimer);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    status = pNtOpenTimer(&handle2, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name2U);
+    pNtClose(handle2);
+    pNtClose(handle);
+    status = pNtCreateTimer(&handle, GENERIC_ALL, &attr3, NotificationTimer);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    status = pNtOpenTimer(&handle2, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name3U);
+    pNtClose(handle2);
+    pNtClose(handle);
+
+    size.QuadPart = 4096;
+    status = pNtCreateSection(&handle, GENERIC_ALL, &attr, &size, PAGE_READWRITE, SEC_COMMIT, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle, name, FALSE);
+    status = pNtOpenSection(&handle2, GENERIC_ALL, &attr);
+    ok(!status, "got %08lx\n", status);
+    test_object_name(handle2, name, FALSE);
+    pNtClose(handle2);
+    pNtClose(handle);
+    status = pNtCreateSection(&handle, GENERIC_ALL, &attr2, &size, PAGE_READWRITE, SEC_COMMIT, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name2U);
+    status = pNtOpenSection(&handle2, GENERIC_ALL, &attr2);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name2U);
+    pNtClose(handle2);
+    pNtClose(handle);
+    status = pNtCreateSection(&handle, GENERIC_ALL, &attr3, &size, PAGE_READWRITE, SEC_COMMIT, 0);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle, &name3U);
+    status = pNtOpenSection(&handle2, GENERIC_ALL, &attr3);
+    ok(!status, "got %08lx\n", status);
+    test_object_name_with_null(handle2, &name3U);
+    pNtClose(handle2);
+    pNtClose(handle);
+
+    wcscpy(name, L"\\Registry\\Machine\\Software\\wine_test");
+    wcscpy(name3, L"\\Registry\\Machine\\Software\\wine_test");
+    p = wcsrchr(name3, '\\');
+    p[5] = 0; /* => \\wine\0test */
+
+    RtlInitUnicodeString(&nameU, name);
+    name2U = nameU;
+    name3U = nameU;
+    name3U.Buffer = name3;
+#ifdef _WIN64
+    name_exp = name;
+    name3_exp = name3;
+    name2U_exp = name2U;
+#else
+    if (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64)
+    {
+        name_exp = (WCHAR *)L"\\Registry\\Machine\\Software\\WOW6432Node\\wine_test";
+        name3_exp =(WCHAR *) L"\\Registry\\Machine\\Software\\WOW6432Node\\wine\0test";
+    }
+    else
+    {
+        name_exp = name;
+        name3_exp = name3;
+    }
+    RtlInitUnicodeString(&name2U_exp, name_exp);
+#endif
+    name3U_exp = name2U_exp;
+    name3U_exp.Buffer = name3_exp;
+    name2U.Length += sizeof(WCHAR); /* add terminating \0 to string length */
+    name2U_exp.Length += sizeof(WCHAR); /* add terminating \0 to string length */
+
+    status = pNtCreateKey(&handle, GENERIC_ALL, &attr, 0, NULL, 0, NULL);
+    ok(!status || status == STATUS_ACCESS_DENIED || broken(status == STATUS_OBJECT_PATH_NOT_FOUND) /* win8 */, "got %08lx\n", status);
+    if (!status)
+    {
+        test_object_name(handle, name_exp, FALSE);
+        status = pNtOpenKey(&handle2, GENERIC_ALL, &attr);
+        ok(!status, "got %08lx\n", status);
+        test_object_name(handle2, name_exp, FALSE);
+        pNtClose(handle2);
+        status = pNtOpenKey(&handle2, GENERIC_ALL, &attr2);
+        ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+        pNtDeleteKey(handle);
+        pNtClose(handle);
+        status = pNtCreateKey(&handle, GENERIC_ALL, &attr2, 0, NULL, 0, NULL);
+        ok(!status, "got %08lx\n", status);
+        test_object_name_with_null(handle, &name2U_exp);
+        status = pNtOpenKey(&handle2, GENERIC_ALL, &attr2);
+        ok(!status, "got %08lx\n", status);
+        test_object_name_with_null(handle, &name2U_exp);
+        pNtClose(handle2);
+        status = pNtOpenKey(&handle2, GENERIC_ALL, &attr);
+        ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %08lx\n", status);
+        pNtDeleteKey(handle);
+        pNtClose(handle);
+        status = pNtCreateKey(&handle, GENERIC_ALL, &attr3, 0, NULL, 0, NULL);
+        ok(!status, "got %08lx\n", status);
+        test_object_name_with_null(handle, &name3U_exp);
+        status = pNtOpenKey(&handle2, GENERIC_ALL, &attr3);
+        ok(!status, "got %08lx\n", status);
+        test_object_name_with_null(handle, &name3U_exp);
+        pNtClose(handle2);
+        pNtDeleteKey(handle);
+        pNtClose(handle);
+    }
+    else
+        skip("Limited access to \\Registry\\Machine\\Software key, skipping the tests\n");
+}
+
 START_TEST(om)
 {
     HMODULE hntdll = GetModuleHandleA("ntdll.dll");
@@ -2545,6 +3114,7 @@ START_TEST(om)
     pNtDuplicateObject      =  (void *)GetProcAddress(hntdll, "NtDuplicateObject");
     pNtCompareObjects       =  (void *)GetProcAddress(hntdll, "NtCompareObjects");
 
+    test_null_in_object_name();
     test_case_sensitive();
     test_namespace_pipe();
     test_name_collisions();
@@ -2561,4 +3131,5 @@ START_TEST(om)
     test_get_next_thread();
     test_globalroot();
     test_object_identity();
+    test_query_directory();
 }

@@ -26,6 +26,7 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#define WINE_NO_LONG_TYPES /* temporary */
 
 #include <stdio.h>
 
@@ -3397,7 +3398,7 @@ static void arbfp_add_sRGB_correction(struct wined3d_string_buffer *buffer, cons
     /* [0.0;1.0] clamping. Not needed, this is done implicitly */
 }
 
-static const DWORD *find_loop_control_values(const struct wined3d_shader *shader, DWORD idx)
+static const unsigned int *find_loop_control_values(const struct wined3d_shader *shader, DWORD idx)
 {
     const struct wined3d_shader_lconst *constant;
 
@@ -3719,7 +3720,7 @@ static GLuint shader_arb_generate_pshader(const struct wined3d_shader *shader,
         compiled->int_consts[i] = WINED3D_CONST_NUM_UNUSED;
         if (reg_maps->integer_constants & (1u << i) && priv_ctx.target_version >= NV2)
         {
-            const DWORD *control_values = find_loop_control_values(shader, i);
+            const unsigned int *control_values = find_loop_control_values(shader, i);
 
             if(control_values)
             {
@@ -4167,7 +4168,7 @@ static GLuint shader_arb_generate_vshader(const struct wined3d_shader *shader,
         compiled->int_consts[i] = WINED3D_CONST_NUM_UNUSED;
         if (reg_maps->integer_constants & (1u << i) && priv_ctx.target_version >= NV2)
         {
-            const DWORD *control_values = find_loop_control_values(shader, i);
+            const unsigned int *control_values = find_loop_control_values(shader, i);
 
             if(control_values)
             {
@@ -5080,6 +5081,7 @@ static const SHADER_HANDLER shader_arb_instruction_handler_table[WINED3DSIH_TABL
     /* WINED3DSIH_ENDREP                           */ shader_hw_endrep,
     /* WINED3DSIH_ENDSWITCH                        */ NULL,
     /* WINED3DSIH_EQ                               */ NULL,
+    /* WINED3DSIH_EVAL_CENTROID                    */ NULL,
     /* WINED3DSIH_EVAL_SAMPLE_INDEX                */ NULL,
     /* WINED3DSIH_EXP                              */ shader_hw_scalar_op,
     /* WINED3DSIH_EXPP                             */ shader_hw_scalar_op,
@@ -5786,7 +5788,7 @@ static void arbfp_get_caps(const struct wined3d_adapter *adapter, struct fragmen
     caps->MaxSimultaneousTextures = min(gl_info->limits.samplers[WINED3D_SHADER_TYPE_PIXEL], WINED3D_MAX_TEXTURES);
 }
 
-static DWORD arbfp_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int arbfp_get_emul_mask(const struct wined3d_gl_info *gl_info)
 {
     return GL_EXT_EMUL_ARB_MULTITEXTURE | GL_EXT_EMUL_EXT_FOG_COORD;
 }
@@ -7744,8 +7746,8 @@ static BOOL arbfp_blit_supported(enum wined3d_blit_op blit_op, const struct wine
             return FALSE;
     }
 
-    decompress = (src_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_COMPRESSED)
-            && !(dst_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_COMPRESSED);
+    decompress = (src_format->attrs & WINED3D_FORMAT_ATTR_COMPRESSED)
+            && !(dst_format->attrs & WINED3D_FORMAT_ATTR_COMPRESSED);
     if (!decompress && !(src_resource->access & dst_resource->access & WINED3D_RESOURCE_ACCESS_GPU))
         return FALSE;
 
@@ -7908,26 +7910,7 @@ static DWORD arbfp_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bl
         dst_rect = &d;
     }
 
-    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
-    {
-        GLenum buffer;
-
-        if (dst_location == WINED3D_LOCATION_DRAWABLE)
-        {
-            TRACE("Destination texture %p is onscreen.\n", dst_texture);
-            buffer = wined3d_texture_get_gl_buffer(dst_texture);
-        }
-        else
-        {
-            TRACE("Destination texture %p is offscreen.\n", dst_texture);
-            buffer = GL_COLOR_ATTACHMENT0;
-        }
-        wined3d_context_gl_apply_fbo_state_blit(context_gl, GL_DRAW_FRAMEBUFFER,
-                &dst_texture->resource, dst_sub_resource_idx, NULL, 0, dst_location);
-        wined3d_context_gl_set_draw_buffer(context_gl, buffer);
-        wined3d_context_gl_check_fbo_status(context_gl, GL_DRAW_FRAMEBUFFER);
-        context_invalidate_state(context, STATE_FRAMEBUFFER);
-    }
+    context_gl_apply_texture_draw_state(context_gl, dst_texture, dst_sub_resource_idx, dst_location);
 
     if (op == WINED3D_BLIT_OP_COLOR_BLIT_ALPHATEST)
     {
@@ -7957,7 +7940,7 @@ static DWORD arbfp_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bl
 
 static void arbfp_blitter_clear(struct wined3d_blitter *blitter, struct wined3d_device *device,
         unsigned int rt_count, const struct wined3d_fb_state *fb, unsigned int rect_count, const RECT *clear_rects,
-        const RECT *draw_rect, DWORD flags, const struct wined3d_color *colour, float depth, DWORD stencil)
+        const RECT *draw_rect, uint32_t flags, const struct wined3d_color *colour, float depth, unsigned int stencil)
 {
     struct wined3d_blitter *next;
 

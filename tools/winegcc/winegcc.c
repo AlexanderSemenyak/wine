@@ -172,7 +172,6 @@ struct options
     int nodefaultlibs;
     int noshortwchar;
     int data_only;
-    int unix_lib;
     int gui_app;
     int unicode_app;
     int win16_app;
@@ -404,7 +403,7 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
     switch (opts->target.platform)
     {
     case PLATFORM_APPLE:
-        strarray_add( &flags, opts->unix_lib ? "-dynamiclib" : "-bundle" );
+        strarray_add( &flags, "-bundle" );
         strarray_add( &flags, "-multiply_defined" );
         strarray_add( &flags, "suppress" );
         if (opts->image_base)
@@ -413,12 +412,6 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
             strarray_add( &flags, opts->image_base );
         }
         if (opts->strip) strarray_add( &flags, "-Wl,-x" );
-        if (opts->unix_lib)
-        {
-            strarray_add( &flags, "-install_name" );
-            strarray_add( &flags, strmake( "@rpath/%s.so", output_name ) );
-            strarray_add( &flags, "-Wl,-rpath,@loader_path/" );
-        }
         strarray_addall( &link_args, flags );
         return link_args;
 
@@ -464,7 +457,7 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
             strarray_add( &flags, "-static-libgcc" );
 
         if (opts->debug_file && strendswith(opts->debug_file, ".pdb"))
-            strarray_add(&link_args, strmake("-Wl,-pdb,%s", opts->debug_file));
+            strarray_add(&link_args, strmake("-Wl,--pdb=%s", opts->debug_file));
 
         if (opts->out_implib)
             strarray_add(&link_args, strmake("-Wl,--out-implib,%s", opts->out_implib));
@@ -489,7 +482,8 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
         }
         if (opts->unicode_app) strarray_add( &flags, "-municode" );
         if (opts->nodefaultlibs || opts->use_msvcrt) strarray_add( &flags, "-nodefaultlibs" );
-        if (opts->nostartfiles || opts->use_msvcrt) strarray_add( &flags, "-nostartfiles" );
+        if (opts->nostartfiles) strarray_add( &flags, "-nostartfiles" );
+        if (opts->use_msvcrt) strarray_add( &flags, "-nostdlib" );
         if (opts->image_base) strarray_add( &flags, strmake("-Wl,-base:%s", opts->image_base ));
         if (opts->subsystem)
             strarray_add( &flags, strmake("-Wl,-subsystem:%s", opts->subsystem ));
@@ -522,7 +516,6 @@ static struct strarray get_link_args( struct options *opts, const char *output_n
         }
         if (!try_link( opts->prefix, link_args, "-Wl,-z,max-page-size=0x1000"))
             strarray_add( &flags, "-Wl,-z,max-page-size=0x1000");
-        if (opts->unix_lib) strarray_add( &flags, strmake( "-Wl,-soname,%s.so", output_name ));
         break;
     }
 
@@ -660,7 +653,7 @@ static void init_argv0_dir( const char *argv0 )
     static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
     size_t path_size = PATH_MAX;
     char *path = xmalloc( path_size );
-    if (!sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
+    if (!sysctl( pathname, ARRAY_SIZE(pathname), path, &path_size, NULL, 0 ))
         dir = realpath( path, NULL );
     free( path );
 #else
@@ -1020,7 +1013,11 @@ static const char *build_spec_obj( struct options *opts, const char *spec_file, 
     }
 
     spec_o_name = get_temp_file(output_name, ".spec.o");
-    if (opts->pic && !is_pe) strarray_add(&spec_args, "-fPIC");
+    if (!is_pe)
+    {
+        if (opts->pic) strarray_add(&spec_args, "-fPIC");
+        if (opts->use_msvcrt) strarray_add(&spec_args, "-mno-cygwin");
+    }
     strarray_add(&spec_args, opts->shared ? "--dll" : "--exe");
     if (opts->fake_module)
     {
@@ -1262,7 +1259,7 @@ static void build(struct options* opts)
     /* set default entry point, if needed */
     if (!opts->entry_point)
     {
-        if (opts->subsystem && !opts->unix_lib && !strcmp( opts->subsystem, "native" ))
+        if (opts->subsystem && !strcmp( opts->subsystem, "native" ))
             entry_point = (is_pe && opts->target.cpu == CPU_i386) ? "DriverEntry@8" : "DriverEntry";
         else if (opts->use_msvcrt && !opts->shared && !opts->win16_app)
             entry_point = opts->unicode_app ? "wmainCRTStartup" : "mainCRTStartup";
@@ -1275,8 +1272,7 @@ static void build(struct options* opts)
         build_data_lib( opts, spec_file, output_file, files );
         return;
     }
-    if (spec_file || !opts->unix_lib)
-        spec_o_name = build_spec_obj( opts, spec_file, output_file, files, lib_dirs, entry_point );
+    spec_o_name = build_spec_obj( opts, spec_file, output_file, files, lib_dirs, entry_point );
 
     if (opts->fake_module) return;  /* nothing else to do */
 
@@ -1413,8 +1409,6 @@ static void build(struct options* opts)
         strarray_add(&tool, output_path);
         spawn(opts->prefix, tool, 0);
     }
-
-    if (opts->unix_lib) return;
 
     if (opts->out_implib && !is_pe)
     {
@@ -1729,7 +1723,6 @@ int main(int argc, char **argv)
                     {
 			opts.use_msvcrt = 1;
                         raw_compiler_arg = 0;
-                        raw_winebuild_arg = 1;
                     }
 		    if (strcmp("-mcygwin", opts.args.str[i]) == 0)
                     {
@@ -1755,12 +1748,6 @@ int main(int argc, char **argv)
 		    else if (strcmp("-mthreads", opts.args.str[i]) == 0)
                     {
                         raw_compiler_arg = 0;
-                    }
-		    else if (strcmp("-munix", opts.args.str[i]) == 0)
-                    {
-			opts.unix_lib = 1;
-                        raw_compiler_arg = 0;
-                        raw_winebuild_arg = 1;
                     }
 		    else if (strcmp("-m16", opts.args.str[i]) == 0)
                     {
@@ -1997,7 +1984,7 @@ int main(int argc, char **argv)
     if (opts.processor == proc_cpp) linking = 0;
     if (linking == -1) error("Static linking is not supported\n");
 
-    if (!opts.wine_objdir && is_pe_target( &opts )) opts.use_msvcrt = 1;
+    if (is_pe_target( &opts )) opts.use_msvcrt = 1;
 
     if (opts.files.count == 0 && !opts.fake_module) forward(&opts);
     else if (linking) build(&opts);

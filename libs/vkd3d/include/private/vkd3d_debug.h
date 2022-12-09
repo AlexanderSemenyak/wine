@@ -47,6 +47,7 @@ enum vkd3d_dbg_level
 enum vkd3d_dbg_level vkd3d_dbg_get_level(void);
 
 void vkd3d_dbg_printf(enum vkd3d_dbg_level level, const char *function, const char *fmt, ...) VKD3D_PRINTF_FUNC(3, 4);
+void vkd3d_dbg_set_log_callback(PFN_vkd3d_log callback);
 
 const char *vkd3d_dbg_sprintf(const char *fmt, ...) VKD3D_PRINTF_FUNC(1, 2);
 const char *vkd3d_dbg_vsprintf(const char *fmt, va_list args);
@@ -114,5 +115,6 @@ struct vkd3d_debug_option
 bool vkd3d_debug_list_has_member(const char *string, const char *member);
 uint64_t vkd3d_parse_debug_options(const char *string,
         const struct vkd3d_debug_option *options, unsigned int option_count);
+void vkd3d_set_thread_name(const char *name);
 
 #endif  /* __VKD3D_DEBUG_H */

@@ -44,7 +44,7 @@ static inline EnumeratorInstance *enumerator_this(jsval_t vthis)
     return (jsdisp && is_class(jsdisp, JSCLASS_ENUMERATOR)) ? enumerator_from_jsdisp(jsdisp) : NULL;
 }
 
-static inline HRESULT enumvar_get_next_item(EnumeratorInstance *This)
+static inline HRESULT enumvar_get_next_item(EnumeratorInstance *This, script_ctx_t *ctx)
 {
     HRESULT hres;
     VARIANT nextitem;
@@ -60,7 +60,7 @@ static inline HRESULT enumvar_get_next_item(EnumeratorInstance *This)
     hres = IEnumVARIANT_Next(This->enumvar, 1, &nextitem, NULL);
     if (hres == S_OK)
     {
-        hres = variant_to_jsval(&nextitem, &This->item);
+        hres = variant_to_jsval(ctx, &nextitem, &This->item);
         VariantClear(&nextitem);
         if (FAILED(hres))
         {
@@ -85,7 +85,12 @@ static void Enumerator_destructor(jsdisp_t *dispex)
     TRACE("\n");
 
     jsval_release(This->item);
-    heap_free(dispex);
+    free(dispex);
+}
+
+static HRESULT Enumerator_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
+{
+    return gc_process_linked_val(gc_ctx, op, dispex, &enumerator_from_jsdisp(dispex)->item);
 }
 
 static HRESULT Enumerator_atEnd(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
@@ -134,7 +139,7 @@ static HRESULT Enumerator_moveFirst(script_ctx_t *ctx, jsval_t vthis, WORD flags
             return hres;
 
         This->atend = FALSE;
-        hres = enumvar_get_next_item(This);
+        hres = enumvar_get_next_item(This, ctx);
         if(FAILED(hres))
             return hres;
     }
@@ -157,7 +162,7 @@ static HRESULT Enumerator_moveNext(script_ctx_t *ctx, jsval_t vthis, WORD flags,
 
     if (This->enumvar)
     {
-        hres = enumvar_get_next_item(This);
+        hres = enumvar_get_next_item(This, ctx);
         if (FAILED(hres))
             return hres;
     }
@@ -189,7 +194,11 @@ static const builtin_info_t EnumeratorInst_info = {
     0,
     NULL,
     Enumerator_destructor,
-    NULL
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    Enumerator_gc_traverse
 };
 
 static HRESULT alloc_enumerator(script_ctx_t *ctx, jsdisp_t *object_prototype, EnumeratorInstance **ret)
@@ -197,7 +206,7 @@ static HRESULT alloc_enumerator(script_ctx_t *ctx, jsdisp_t *object_prototype, E
     EnumeratorInstance *enumerator;
     HRESULT hres;
 
-    enumerator = heap_alloc_zero(sizeof(EnumeratorInstance));
+    enumerator = calloc(1, sizeof(EnumeratorInstance));
     if(!enumerator)
         return E_OUTOFMEMORY;
 
@@ -209,7 +218,7 @@ static HRESULT alloc_enumerator(script_ctx_t *ctx, jsdisp_t *object_prototype, E
 
     if(FAILED(hres))
     {
-        heap_free(enumerator);
+        free(enumerator);
         return hres;
     }
 
@@ -272,7 +281,7 @@ static HRESULT create_enumerator(script_ctx_t *ctx, jsval_t *argv, jsdisp_t **re
 
     enumerator->enumvar = enumvar;
     enumerator->atend = !enumvar;
-    hres = enumvar_get_next_item(enumerator);
+    hres = enumvar_get_next_item(enumerator, ctx);
     if (FAILED(hres))
     {
         jsdisp_release(&enumerator->dispex);
@@ -300,7 +309,8 @@ static HRESULT EnumeratorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD fla
         if(FAILED(hres))
             return hres;
 
-        *r = jsval_obj(obj);
+        if(r) *r = jsval_obj(obj);
+        else  jsdisp_release(obj);
         break;
     }
     default:

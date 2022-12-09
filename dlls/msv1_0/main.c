@@ -30,6 +30,7 @@
 #include "ntsecpkg.h"
 #include "rpc.h"
 #include "wincred.h"
+#include "wincrypt.h"
 #include "lmwksta.h"
 #include "lmapibuf.h"
 #include "lmerr.h"
@@ -42,30 +43,28 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 static ULONG ntlm_package_id;
 static LSA_DISPATCH_TABLE lsa_dispatch;
 
-static unixlib_handle_t ntlm_handle;
-
 static NTSTATUS ntlm_check_version(void)
 {
-    return __wine_unix_call( ntlm_handle, unix_check_version, NULL );
+    return WINE_UNIX_CALL( unix_check_version, NULL );
 }
 
 static void ntlm_cleanup( struct ntlm_ctx *ctx )
 {
-    __wine_unix_call( ntlm_handle, unix_cleanup, ctx );
+    WINE_UNIX_CALL( unix_cleanup, ctx );
 }
 
 static NTSTATUS ntlm_chat( struct ntlm_ctx *ctx, char *buf, unsigned int buflen, unsigned int *retlen )
 {
     struct chat_params params = { ctx, buf, buflen, retlen };
 
-    return __wine_unix_call( ntlm_handle, unix_chat, &params );
+    return WINE_UNIX_CALL( unix_chat, &params );
 }
 
 static NTSTATUS ntlm_fork( struct ntlm_ctx *ctx, char **argv )
 {
     struct fork_params params = { ctx, argv };
 
-    return __wine_unix_call( ntlm_handle, unix_fork, &params );
+    return WINE_UNIX_CALL( unix_fork, &params );
 }
 
 #define NTLM_CAPS \
@@ -1134,7 +1133,6 @@ static NTSTATUS NTAPI ntlm_SpQueryContextAttributes( LSA_SEC_HANDLE handle, ULON
     X(SECPKG_ATTR_ACCESS_TOKEN);
     X(SECPKG_ATTR_AUTHORITY);
     X(SECPKG_ATTR_DCE_INFO);
-    X(SECPKG_ATTR_KEY_INFO);
     X(SECPKG_ATTR_LIFESPAN);
     X(SECPKG_ATTR_NAMES);
     X(SECPKG_ATTR_NATIVE_NAMES);
@@ -1167,6 +1165,42 @@ static NTSTATUS NTAPI ntlm_SpQueryContextAttributes( LSA_SEC_HANDLE handle, ULON
         SecPkgContext_NegotiationInfoW *info = (SecPkgContext_NegotiationInfoW *)buf;
         if (!(info->PackageInfo = build_package_info( &ntlm_package_info ))) return SEC_E_INSUFFICIENT_MEMORY;
         info->NegotiationState = SECPKG_NEGOTIATION_COMPLETE;
+        return SEC_E_OK;
+    }
+    case SECPKG_ATTR_KEY_INFO:
+    {
+        struct ntlm_ctx *ctx = (struct ntlm_ctx *)handle;
+        SecPkgContext_KeyInfoW *info = (SecPkgContext_KeyInfoW *)buf;
+        SEC_WCHAR *signature_alg;
+        ULONG signature_size, signature_algid;
+
+        if (ctx->flags & FLAG_NEGOTIATE_KEY_EXCHANGE)
+        {
+            signature_alg = (SEC_WCHAR *)L"HMAC-MD5";
+            signature_size = sizeof(L"HMAC-MD5");
+            signature_algid = 0xffffff76;
+        }
+        else
+        {
+            signature_alg = (SEC_WCHAR *)L"RSADSI RC4-CRC32";
+            signature_size = sizeof(L"RSADSI RC4-CRC32");
+            signature_algid = 0xffffff7c;
+        }
+
+        if (!(info->sSignatureAlgorithmName = RtlAllocateHeap( GetProcessHeap(), 0, signature_size )))
+            return SEC_E_INSUFFICIENT_MEMORY;
+        wcscpy( info->sSignatureAlgorithmName, signature_alg );
+
+        if (!(info->sEncryptAlgorithmName = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(L"RSADSI RC4") )))
+        {
+            RtlFreeHeap( GetProcessHeap(), 0, info->sSignatureAlgorithmName );
+            return SEC_E_INSUFFICIENT_MEMORY;
+        }
+        wcscpy( info->sEncryptAlgorithmName, L"RSADSI RC4" );
+
+        info->KeySize = sizeof(ctx->session_key) * 8;
+        info->SignatureAlgorithm = signature_algid;
+        info->EncryptAlgorithm = CALG_RC4;
         return SEC_E_OK;
     }
 #undef X
@@ -1572,8 +1606,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, void *reserved )
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-        if (NtQueryVirtualMemory( GetCurrentProcess(), hinst, MemoryWineUnixFuncs,
-                                  &ntlm_handle, sizeof(ntlm_handle), NULL ))
+        if (__wine_init_unix_call())
             return FALSE;
         DisableThreadLibraryCalls( hinst );
         break;

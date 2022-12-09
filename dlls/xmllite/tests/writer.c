@@ -27,13 +27,45 @@
 #include "ole2.h"
 #include "xmllite.h"
 
-#include "wine/heap.h"
 #include "wine/test.h"
 
 #include "initguid.h"
 DEFINE_GUID(IID_IXmlWriterOutput, 0xc1131708, 0x0f59, 0x477f, 0x93, 0x59, 0x7d, 0x33, 0x24, 0x51, 0xbc, 0x1a);
 
-static const WCHAR aW[] = {'a',0};
+static IStream *create_stream_on_data(const void *data, unsigned int size)
+{
+    IStream *stream = NULL;
+    HGLOBAL hglobal;
+    void *ptr;
+    HRESULT hr;
+
+    hglobal = GlobalAlloc(GHND, size);
+    ptr = GlobalLock(hglobal);
+
+    memcpy(ptr, data, size);
+
+    hr = CreateStreamOnHGlobal(hglobal, TRUE, &stream);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(stream != NULL, "Expected non-NULL stream\n");
+
+    GlobalUnlock(hglobal);
+
+    return stream;
+}
+
+#define reader_set_input(a, b) _reader_set_input(__LINE__, a, b)
+static void _reader_set_input(unsigned line, IXmlReader *reader, const char *xml)
+{
+    IStream *stream;
+    HRESULT hr;
+
+    stream = create_stream_on_data(xml, strlen(xml));
+
+    hr = IXmlReader_SetInput(reader, (IUnknown *)stream);
+    ok_(__FILE__,line)(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    IStream_Release(stream);
+}
 
 #define EXPECT_REF(obj, ref) _expect_ref((IUnknown *)obj, ref, __LINE__)
 static void _expect_ref(IUnknown *obj, ULONG ref, int line)
@@ -93,19 +125,6 @@ static void check_output(IStream *stream, const char *expected, BOOL todo, int l
 #define CHECK_OUTPUT_TODO(stream, expected) check_output(stream, expected, TRUE, __LINE__)
 #define CHECK_OUTPUT_RAW(stream, expected, size) check_output_raw(stream, expected, size, __LINE__)
 
-static WCHAR *strdupAtoW(const char *str)
-{
-    WCHAR *ret = NULL;
-    DWORD len;
-
-    if (!str) return ret;
-    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-    ret = heap_alloc(len * sizeof(WCHAR));
-    if (ret)
-        MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
-    return ret;
-}
-
 static void writer_set_property(IXmlWriter *writer, XmlWriterProperty property)
 {
     HRESULT hr;
@@ -117,30 +136,35 @@ static void writer_set_property(IXmlWriter *writer, XmlWriterProperty property)
 /* used to test all Write* methods for consistent error state */
 static void check_writer_state(IXmlWriter *writer, HRESULT exp_hr)
 {
-    static const WCHAR aW[] = {'a',0};
+    IXmlReader *reader;
     HRESULT hr;
+    WCHAR low = 0xdcef;
+    WCHAR high = 0xdaff;
+
+    hr = CreateXmlReader(&IID_IXmlReader, (void **)&reader, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     /* FIXME: add WriteAttributes */
 
-    hr = IXmlWriter_WriteAttributeString(writer, NULL, aW, NULL, aW);
+    hr = IXmlWriter_WriteAttributeString(writer, NULL, L"a", NULL, L"a");
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteCData(writer, aW);
+    hr = IXmlWriter_WriteCData(writer, L"a");
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteCharEntity(writer, aW[0]);
+    hr = IXmlWriter_WriteCharEntity(writer, 'a');
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteChars(writer, aW, 1);
+    hr = IXmlWriter_WriteChars(writer, L"a", 1);
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteComment(writer, aW);
+    hr = IXmlWriter_WriteComment(writer, L"a");
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteDocType(writer, aW, NULL, NULL, NULL);
+    hr = IXmlWriter_WriteDocType(writer, L"a", NULL, NULL, NULL);
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteElementString(writer, NULL, aW, NULL, aW);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"a", NULL, L"a");
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
     hr = IXmlWriter_WriteEndDocument(writer);
@@ -149,44 +173,59 @@ static void check_writer_state(IXmlWriter *writer, HRESULT exp_hr)
     hr = IXmlWriter_WriteEndElement(writer);
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteEntityRef(writer, aW);
+    hr = IXmlWriter_WriteEntityRef(writer, L"a");
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
     hr = IXmlWriter_WriteFullEndElement(writer);
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteName(writer, aW);
+    hr = IXmlWriter_WriteName(writer, L"a");
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteNmToken(writer, aW);
+    hr = IXmlWriter_WriteNmToken(writer, L"a");
     ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    /* FIXME: add WriteNode */
-    /* FIXME: add WriteNodeShallow */
+    hr = IXmlWriter_WriteNode(writer, NULL, FALSE);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteProcessingInstruction(writer, aW, aW);
-    ok(hr == exp_hr, "Unexpected hr %#lx., expected %#lx.\n", hr, exp_hr);
+    reader_set_input(reader, "<a/>");
+    hr = IXmlWriter_WriteNode(writer, reader, FALSE);
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteQualifiedName(writer, aW, NULL);
-    ok(hr == exp_hr, "Unexpected hr %#lx., expected %#lx.\n", hr, exp_hr);
+    reader_set_input(reader, "<a/>");
+    hr = IXmlReader_Read(reader, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteNodeShallow(writer, reader, FALSE);
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteRaw(writer, aW);
-    ok(hr == exp_hr, "Unexpected hr %#lx., expected %#lx.\n", hr, exp_hr);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"a", L"a");
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteRawChars(writer, aW, 1);
-    ok(hr == exp_hr, "Unexpected hr %#lx., expected %#lx.\n", hr, exp_hr);
+    hr = IXmlWriter_WriteQualifiedName(writer, L"a", NULL);
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
+
+    hr = IXmlWriter_WriteRaw(writer, L"a");
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"a", 1);
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
-    ok(hr == exp_hr, "Unexpected hr %#lx., expected %#lx.\n", hr, exp_hr);
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
-    ok(hr == exp_hr, "Unexpected hr %#lx., expected %#lx.\n", hr, exp_hr);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    hr = IXmlWriter_WriteString(writer, aW);
-    ok(hr == exp_hr, "Unexpected hr %#lx., expected %#lx.\n", hr, exp_hr);
+    hr = IXmlWriter_WriteString(writer, L"a");
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
 
-    /* FIXME: add WriteSurrogateCharEntity */
-    /* FIXME: add WriteWhitespace */
+    hr = IXmlWriter_WriteSurrogateCharEntity(writer, low, high);
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
+
+    hr = IXmlWriter_WriteWhitespace(writer, L" ");
+    ok(hr == exp_hr, "Unexpected hr %#lx, expected %#lx.\n", hr, exp_hr);
+
+    IXmlReader_Release(reader);
 }
 
 static IStream *writer_set_output(IXmlWriter *writer)
@@ -334,32 +373,38 @@ static void test_writer_create(void)
 
 static void test_invalid_output_encoding(IXmlWriter *writer, IUnknown *output)
 {
+    IXmlReader *reader;
     HRESULT hr;
+    WCHAR low = 0xdcef;
+    WCHAR high = 0xdaff;
+
+    hr = CreateXmlReader(&IID_IXmlReader, (void **)&reader, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_SetOutput(writer, output);
     ok(hr == S_OK, "Failed to set output, hr %#lx.\n", hr);
 
     /* TODO: WriteAttributes */
 
-    hr = IXmlWriter_WriteAttributeString(writer, NULL, aW, NULL, aW);
+    hr = IXmlWriter_WriteAttributeString(writer, NULL, L"a", NULL, L"a");
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteCData(writer, aW);
+    hr = IXmlWriter_WriteCData(writer, L"a");
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteCharEntity(writer, 0x100);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteChars(writer, aW, 1);
+    hr = IXmlWriter_WriteChars(writer, L"a", 1);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteComment(writer, aW);
+    hr = IXmlWriter_WriteComment(writer, L"a");
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteDocType(writer, aW, NULL, NULL, NULL);
+    hr = IXmlWriter_WriteDocType(writer, L"a", NULL, NULL, NULL);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteElementString(writer, NULL, aW, NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"a", NULL, NULL);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndDocument(writer);
@@ -368,54 +413,66 @@ static void test_invalid_output_encoding(IXmlWriter *writer, IUnknown *output)
     hr = IXmlWriter_WriteEndElement(writer);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteEntityRef(writer, aW);
+    hr = IXmlWriter_WriteEntityRef(writer, L"a");
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteFullEndElement(writer);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteName(writer, aW);
+    hr = IXmlWriter_WriteName(writer, L"a");
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteNmToken(writer, aW);
+    hr = IXmlWriter_WriteNmToken(writer, L"a");
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    /* TODO: WriteNode */
-    /* TODO: WriteNodeShallow */
-
-    hr = IXmlWriter_WriteProcessingInstruction(writer, aW, aW);
+    reader_set_input(reader, "<a/>");
+    hr = IXmlWriter_WriteNode(writer, reader, FALSE);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteQualifiedName(writer, aW, NULL);
+    hr = IXmlWriter_WriteNodeShallow(writer, reader, FALSE);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteRaw(writer, aW);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"a", L"a");
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteRawChars(writer, aW, 1);
+    hr = IXmlWriter_WriteQualifiedName(writer, L"a", NULL);
+    ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRaw(writer, L"a");
+    ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"a", 1);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Yes);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteString(writer, aW);
+    hr = IXmlWriter_WriteString(writer, L"a");
     ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
-    /* TODO: WriteSurrogateCharEntity */
-    /* TODO: WriteWhitespace */
+    hr = IXmlWriter_WriteSurrogateCharEntity(writer, low, high);
+    ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteWhitespace(writer, L" ");
+    ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, L"a", 1);
+    ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"a", 1);
+    ok(hr == MX_E_ENCODING, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
     ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+
+    IXmlReader_Release(reader);
 }
 
 static void test_writeroutput(void)
 {
-    static const WCHAR utf16W[] = {'u','t','f','-','1','6',0};
-    static const WCHAR usasciiW[] = {'u','s','-','a','s','c','i','i',0};
-    static const WCHAR dummyW[] = {'d','u','m','m','y',0};
     static const WCHAR utf16_outputW[] = {0xfeff,'<','a'};
     IXmlWriterOutput *output;
     IXmlWriter *writer;
@@ -429,7 +486,7 @@ static void test_writeroutput(void)
     EXPECT_REF(output, 1);
     IUnknown_Release(output);
 
-    hr = CreateXmlWriterOutputWithEncodingName(&testoutput, NULL, utf16W, &output);
+    hr = CreateXmlWriterOutputWithEncodingName(&testoutput, NULL, L"utf-16", &output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     unk = NULL;
     hr = IUnknown_QueryInterface(output, &IID_IXmlWriterOutput, (void**)&unk);
@@ -459,7 +516,7 @@ static void test_writeroutput(void)
 
     /* create with us-ascii */
     output = NULL;
-    hr = CreateXmlWriterOutputWithEncodingName(&testoutput, NULL, usasciiW, &output);
+    hr = CreateXmlWriterOutputWithEncodingName(&testoutput, NULL, L"us-ascii", &output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     IUnknown_Release(output);
 
@@ -476,7 +533,7 @@ static void test_writeroutput(void)
     hr = IXmlWriter_SetOutput(writer, output);
     ok(hr == S_OK, "Failed to set writer output, hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Write failed, hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -506,7 +563,7 @@ static void test_writeroutput(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     output = NULL;
-    hr = CreateXmlWriterOutputWithEncodingName((IUnknown *)stream, NULL, dummyW, &output);
+    hr = CreateXmlWriterOutputWithEncodingName((IUnknown *)stream, NULL, L"dummy", &output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     test_invalid_output_encoding(writer, output);
@@ -523,9 +580,6 @@ static void test_writestartdocument(void)
     static const char fullprolog[] = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>";
     static const char *prologversion2 = "<?xml version=\"1.0\" encoding=\"uS-asCii\"?>";
     static const char prologversion[] = "<?xml version=\"1.0\"?>";
-    static const WCHAR versionW[] = {'v','e','r','s','i','o','n','=','"','1','.','0','"',0};
-    static const WCHAR usasciiW[] = {'u','S','-','a','s','C','i','i',0};
-    static const WCHAR xmlW[] = {'x','m','l',0};
     IXmlWriterOutput *output;
     IXmlWriter *writer;
     IStream *stream;
@@ -538,7 +592,7 @@ static void test_writestartdocument(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Yes);
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteProcessingInstruction(writer, xmlW, versionW);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"xml", L"version=\"1.0\"");
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -566,7 +620,7 @@ static void test_writestartdocument(void)
     /* now add PI manually, and try to start a document */
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteProcessingInstruction(writer, xmlW, versionW);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"xml", L"version=\"1.0\"");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Yes);
@@ -576,7 +630,7 @@ static void test_writestartdocument(void)
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     /* another attempt to add 'xml' PI */
-    hr = IXmlWriter_WriteProcessingInstruction(writer, xmlW, versionW);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"xml", L"version=\"1.0\"");
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -592,7 +646,7 @@ static void test_writestartdocument(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     output = NULL;
-    hr = CreateXmlWriterOutputWithEncodingName((IUnknown *)stream, NULL, usasciiW, &output);
+    hr = CreateXmlWriterOutputWithEncodingName((IUnknown *)stream, NULL, L"uS-asCii", &output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = CreateXmlWriter(&IID_IXmlWriter, (void **)&writer, NULL);
@@ -647,8 +701,6 @@ static void test_flush(void)
 static void test_omitxmldeclaration(void)
 {
     static const char prologversion[] = "<?xml version=\"1.0\"?>";
-    static const WCHAR versionW[] = {'v','e','r','s','i','o','n','=','"','1','.','0','"',0};
-    static const WCHAR xmlW[] = {'x','m','l',0};
     IXmlWriter *writer;
     HGLOBAL hglobal;
     IStream *stream;
@@ -684,7 +736,7 @@ static void test_omitxmldeclaration(void)
     /* now add PI manually, and try to start a document */
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteProcessingInstruction(writer, xmlW, versionW);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"xml", L"version=\"1.0\"");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -709,7 +761,7 @@ static void test_omitxmldeclaration(void)
     CHECK_OUTPUT(stream, prologversion);
 
     /* another attempt to add 'xml' PI */
-    hr = IXmlWriter_WriteProcessingInstruction(writer, xmlW, versionW);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"xml", L"version=\"1.0\"");
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -724,9 +776,6 @@ static void test_bom(void)
     static const WCHAR piW[] = {0xfeff,'<','?','x','m','l',' ','v','e','r','s','i','o','n','=','"','1','.','0','"','?','>'};
     static const WCHAR aopenW[] = {0xfeff,'<','a'};
     static const WCHAR afullW[] = {0xfeff,'<','a',' ','/','>'};
-    static const WCHAR versionW[] = {'v','e','r','s','i','o','n','=','"','1','.','0','"',0};
-    static const WCHAR utf16W[] = {'u','t','f','-','1','6',0};
-    static const WCHAR xmlW[] = {'x','m','l',0};
     static const WCHAR bomW[] = {0xfeff};
     IXmlWriterOutput *output;
     IXmlWriter *writer;
@@ -737,7 +786,7 @@ static void test_bom(void)
     hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = CreateXmlWriterOutputWithEncodingName((IUnknown*)stream, NULL, utf16W, &output);
+    hr = CreateXmlWriterOutputWithEncodingName((IUnknown*)stream, NULL, L"utf-16", &output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = CreateXmlWriter(&IID_IXmlWriter, (void**)&writer, NULL);
@@ -764,13 +813,13 @@ static void test_bom(void)
     hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = CreateXmlWriterOutputWithEncodingName((IUnknown*)stream, NULL, utf16W, &output);
+    hr = CreateXmlWriterOutputWithEncodingName((IUnknown*)stream, NULL, L"utf-16", &output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_SetOutput(writer, output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteProcessingInstruction(writer, xmlW, versionW);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"xml", L"version=\"1.0\"");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -785,13 +834,13 @@ static void test_bom(void)
     hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = CreateXmlWriterOutputWithEncodingName((IUnknown*)stream, NULL, utf16W, &output);
+    hr = CreateXmlWriterOutputWithEncodingName((IUnknown*)stream, NULL, L"utf-16", &output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_SetOutput(writer, output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -806,7 +855,7 @@ static void test_bom(void)
     hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = CreateXmlWriterOutputWithEncodingName((IUnknown*)stream, NULL, utf16W, &output);
+    hr = CreateXmlWriterOutputWithEncodingName((IUnknown*)stream, NULL, L"utf-16", &output);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_SetOutput(writer, output);
@@ -814,7 +863,7 @@ static void test_bom(void)
 
     writer_set_property(writer, XmlWriterProperty_Indent);
 
-    hr = IXmlWriter_WriteElementString(writer, NULL, aW, NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"a", NULL, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -831,67 +880,13 @@ static void test_bom(void)
     IXmlWriter_Release(writer);
 }
 
-static HRESULT write_start_element(IXmlWriter *writer, const char *prefix, const char *local,
-        const char *uri)
-{
-    WCHAR *prefixW, *localW, *uriW;
-    HRESULT hr;
-
-    prefixW = strdupAtoW(prefix);
-    localW = strdupAtoW(local);
-    uriW = strdupAtoW(uri);
-
-    hr = IXmlWriter_WriteStartElement(writer, prefixW, localW, uriW);
-
-    heap_free(prefixW);
-    heap_free(localW);
-    heap_free(uriW);
-
-    return hr;
-}
-
-static HRESULT write_element_string(IXmlWriter *writer, const char *prefix, const char *local,
-        const char *uri, const char *value)
-{
-    WCHAR *prefixW, *localW, *uriW, *valueW;
-    HRESULT hr;
-
-    prefixW = strdupAtoW(prefix);
-    localW = strdupAtoW(local);
-    uriW = strdupAtoW(uri);
-    valueW = strdupAtoW(value);
-
-    hr = IXmlWriter_WriteElementString(writer, prefixW, localW, uriW, valueW);
-
-    heap_free(prefixW);
-    heap_free(localW);
-    heap_free(uriW);
-    heap_free(valueW);
-
-    return hr;
-}
-
-static HRESULT write_string(IXmlWriter *writer, const char *str)
-{
-    WCHAR *strW;
-    HRESULT hr;
-
-    strW = strdupAtoW(str);
-
-    hr = IXmlWriter_WriteString(writer, strW);
-
-    heap_free(strW);
-
-    return hr;
-}
-
 static void test_WriteStartElement(void)
 {
     static const struct
     {
-        const char *prefix;
-        const char *local;
-        const char *uri;
+        const WCHAR *prefix;
+        const WCHAR *local;
+        const WCHAR *uri;
         const char *output;
         const char *output_partial;
         HRESULT hr;
@@ -900,22 +895,23 @@ static void test_WriteStartElement(void)
     }
     start_element_tests[] =
     {
-        { "prefix", "local", "uri", "<prefix:local xmlns:prefix=\"uri\" />", "<prefix:local" },
-        { NULL, "local", "uri", "<local xmlns=\"uri\" />", "<local" },
-        { "", "local", "uri", "<local xmlns=\"uri\" />", "<local" },
-        { "", "local", "uri", "<local xmlns=\"uri\" />", "<local" },
+        { L"prefix", L"local", L"uri", "<prefix:local xmlns:prefix=\"uri\" />", "<prefix:local" },
+        { NULL, L"local", L"uri", "<local xmlns=\"uri\" />", "<local" },
+        { L"", L"local", L"uri", "<local xmlns=\"uri\" />", "<local" },
+        { L"", L"local", L"uri", "<local xmlns=\"uri\" />", "<local" },
+        { NULL, L"local", NULL, "<local />", "<local" },
+        { NULL, L"local", L"", "<local />", "<local" },
 
-        { "prefix", NULL, NULL, NULL, NULL, E_INVALIDARG },
-        { NULL, NULL, "uri", NULL, NULL, E_INVALIDARG },
+        { L"prefix", NULL, NULL, NULL, NULL, E_INVALIDARG },
+        { NULL, NULL, L"uri", NULL, NULL, E_INVALIDARG },
         { NULL, NULL, NULL, NULL, NULL, E_INVALIDARG },
-        { NULL, "prefix:local", "uri", NULL, NULL, WC_E_NAMECHARACTER },
-        { "pre:fix", "local", "uri", NULL, NULL, WC_E_NAMECHARACTER },
-        { NULL, ":local", "uri", NULL, NULL, WC_E_NAMECHARACTER },
-        { ":", "local", "uri", NULL, NULL, WC_E_NAMECHARACTER },
-        { NULL, "local", "http://www.w3.org/2000/xmlns/", NULL, NULL, WR_E_XMLNSPREFIXDECLARATION },
-        { "prefix", "local", "http://www.w3.org/2000/xmlns/", NULL, NULL, WR_E_XMLNSURIDECLARATION },
+        { NULL, L"prefix:local", L"uri", NULL, NULL, WC_E_NAMECHARACTER },
+        { L"pre:fix", L"local", L"uri", NULL, NULL, WC_E_NAMECHARACTER },
+        { NULL, L":local", L"uri", NULL, NULL, WC_E_NAMECHARACTER },
+        { L":", L"local", L"uri", NULL, NULL, WC_E_NAMECHARACTER },
+        { NULL, L"local", L"http://www.w3.org/2000/xmlns/", NULL, NULL, WR_E_XMLNSPREFIXDECLARATION },
+        { L"prefix", L"local", L"http://www.w3.org/2000/xmlns/", NULL, NULL, WR_E_XMLNSURIDECLARATION },
     };
-    static const WCHAR aW[] = {'a',0};
     IXmlWriter *writer;
     IStream *stream;
     unsigned int i;
@@ -924,12 +920,12 @@ static void test_WriteStartElement(void)
     hr = CreateXmlWriter(&IID_IXmlWriter, (void**)&writer, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, NULL, "a", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
     stream = writer_set_output(writer);
 
-    hr = write_start_element(writer, NULL, "a", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Yes);
@@ -946,7 +942,7 @@ static void test_WriteStartElement(void)
     hr = IXmlWriter_WriteStartElement(writer, NULL, NULL, NULL);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteProcessingInstruction(writer, aW, aW);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"a", L"a");
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     IStream_Release(stream);
@@ -956,27 +952,27 @@ static void test_WriteStartElement(void)
     hr = CreateXmlWriter(&IID_IXmlWriter, (void**)&writer, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, NULL, "b", NULL, "value");
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"b", NULL, L"value");
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
     stream = writer_set_output(writer);
 
-    hr = write_start_element(writer, "prefix", "a", "uri");
+    hr = IXmlWriter_WriteStartElement(writer, L"prefix", L"a", L"uri");
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, NULL, "b", NULL, "value");
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"b", NULL, L"value");
     ok(hr == S_OK, "Failed to write element string, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, NULL, "c", NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"c", NULL, NULL);
     ok(hr == S_OK, "Failed to write element string, hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, NULL, "d", "uri");
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"d", L"uri");
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, "", "e", "uri");
+    hr = IXmlWriter_WriteStartElement(writer, L"", L"e", L"uri");
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, "prefix2", "f", "uri");
+    hr = IXmlWriter_WriteStartElement(writer, L"prefix2", L"f", L"uri");
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -1002,7 +998,7 @@ static void test_WriteStartElement(void)
         hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
         ok(hr == S_OK, "Failed to start document, hr %#lx.\n", hr);
 
-        hr = write_start_element(writer, start_element_tests[i].prefix, start_element_tests[i].local,
+        hr = IXmlWriter_WriteStartElement(writer, start_element_tests[i].prefix, start_element_tests[i].local,
                 start_element_tests[i].uri);
         ok(hr == start_element_tests[i].hr, "%u: unexpected hr %#lx.\n", i, hr);
 
@@ -1032,39 +1028,39 @@ static void test_WriteElementString(void)
 {
     static const struct
     {
-        const char *prefix;
-        const char *local;
-        const char *uri;
-        const char *value;
+        const WCHAR *prefix;
+        const WCHAR *local;
+        const WCHAR *uri;
+        const WCHAR *value;
         const char *output;
         HRESULT hr;
         int todo;
     }
     element_string_tests[] =
     {
-        { "prefix", "local", "uri", "value", "<prefix:local xmlns:prefix=\"uri\">value</prefix:local>" },
-        { NULL, "local", "uri", "value", "<local xmlns=\"uri\">value</local>" },
-        { "", "local", "uri", "value", "<local xmlns=\"uri\">value</local>" },
-        { "prefix", "local", "uri", NULL, "<prefix:local xmlns:prefix=\"uri\" />" },
-        { NULL, "local", "uri", NULL, "<local xmlns=\"uri\" />" },
-        { "", "local", "uri", NULL, "<local xmlns=\"uri\" />" },
-        { NULL, "local", NULL, NULL, "<local />" },
-        { "prefix", "local", "uri", "", "<prefix:local xmlns:prefix=\"uri\"></prefix:local>" },
-        { NULL, "local", "uri", "", "<local xmlns=\"uri\"></local>" },
-        { "", "local", "uri", "", "<local xmlns=\"uri\"></local>" },
-        { NULL, "local", NULL, "", "<local></local>" },
-        { "", "local", "http://www.w3.org/2000/xmlns/", NULL, "<local xmlns=\"http://www.w3.org/2000/xmlns/\" />" },
+        { L"prefix", L"local", L"uri", L"value", "<prefix:local xmlns:prefix=\"uri\">value</prefix:local>" },
+        { NULL, L"local", L"uri", L"value", "<local xmlns=\"uri\">value</local>" },
+        { L"", L"local", L"uri", L"value", "<local xmlns=\"uri\">value</local>" },
+        { L"prefix", L"local", L"uri", NULL, "<prefix:local xmlns:prefix=\"uri\" />" },
+        { NULL, L"local", L"uri", NULL, "<local xmlns=\"uri\" />" },
+        { L"", L"local", L"uri", NULL, "<local xmlns=\"uri\" />" },
+        { NULL, L"local", NULL, NULL, "<local />" },
+        { L"prefix", L"local", L"uri", L"", "<prefix:local xmlns:prefix=\"uri\"></prefix:local>" },
+        { NULL, L"local", L"uri", L"", "<local xmlns=\"uri\"></local>" },
+        { L"", L"local", L"uri", L"", "<local xmlns=\"uri\"></local>" },
+        { NULL, L"local", NULL, L"", "<local></local>" },
+        { L"", L"local", L"http://www.w3.org/2000/xmlns/", NULL, "<local xmlns=\"http://www.w3.org/2000/xmlns/\" />" },
 
-        { "prefix", NULL, NULL, "value", NULL, E_INVALIDARG },
-        { NULL, NULL, "uri", "value", NULL, E_INVALIDARG },
-        { NULL, NULL, NULL, "value", NULL, E_INVALIDARG },
-        { NULL, "prefix:local", "uri", "value", NULL, WC_E_NAMECHARACTER },
-        { NULL, ":local", "uri", "value", NULL, WC_E_NAMECHARACTER },
-        { ":", "local", "uri", "value", NULL, WC_E_NAMECHARACTER },
-        { "prefix", "local", NULL, "value", NULL, WR_E_NSPREFIXWITHEMPTYNSURI },
-        { "prefix", "local", "", "value", NULL, WR_E_NSPREFIXWITHEMPTYNSURI },
-        { NULL, "local", "http://www.w3.org/2000/xmlns/", "value", NULL, WR_E_XMLNSPREFIXDECLARATION },
-        { "prefix", "local", "http://www.w3.org/2000/xmlns/", "value", NULL, WR_E_XMLNSURIDECLARATION },
+        { L"prefix", NULL, NULL, L"value", NULL, E_INVALIDARG },
+        { NULL, NULL, L"uri", L"value", NULL, E_INVALIDARG },
+        { NULL, NULL, NULL, L"value", NULL, E_INVALIDARG },
+        { NULL, L"prefix:local", L"uri", L"value", NULL, WC_E_NAMECHARACTER },
+        { NULL, L":local", L"uri", L"value", NULL, WC_E_NAMECHARACTER },
+        { L":", L"local", L"uri", L"value", NULL, WC_E_NAMECHARACTER },
+        { L"prefix", L"local", NULL, L"value", NULL, WR_E_NSPREFIXWITHEMPTYNSURI },
+        { L"prefix", L"local", L"", L"value", NULL, WR_E_NSPREFIXWITHEMPTYNSURI },
+        { NULL, L"local", L"http://www.w3.org/2000/xmlns/", L"value", NULL, WR_E_XMLNSPREFIXDECLARATION },
+        { L"prefix", L"local", L"http://www.w3.org/2000/xmlns/", L"value", NULL, WR_E_XMLNSURIDECLARATION },
     };
     IXmlWriter *writer;
     IStream *stream;
@@ -1074,48 +1070,48 @@ static void test_WriteElementString(void)
     hr = CreateXmlWriter(&IID_IXmlWriter, (void**)&writer, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, NULL, "b", NULL, "value");
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"b", NULL, L"value");
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
     stream = writer_set_output(writer);
 
-    hr = write_start_element(writer, NULL, "a", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, NULL, "b", NULL, "value");
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"b", NULL, L"value");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, NULL, "b", NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"b", NULL, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, "prefix", "b", "uri", NULL);
+    hr = IXmlWriter_WriteElementString(writer, L"prefix", L"b", L"uri", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, "prefix", "c", "uri");
+    hr = IXmlWriter_WriteStartElement(writer, L"prefix", L"c", L"uri");
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, "prefix", "d", NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, L"prefix", L"d", NULL, NULL);
     ok(hr == S_OK, "Failed to write element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, "prefix2", "d", "uri", NULL);
+    hr = IXmlWriter_WriteElementString(writer, L"prefix2", L"d", L"uri", NULL);
     ok(hr == S_OK, "Failed to write element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, NULL, "e", "uri", NULL);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"e", L"uri", NULL);
     ok(hr == S_OK, "Failed to write element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, "prefix", "f", "uri2", NULL);
+    hr = IXmlWriter_WriteElementString(writer, L"prefix", L"f", L"uri2", NULL);
     ok(hr == S_OK, "Failed to write element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, NULL, "g", "uri3", NULL);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"g", L"uri3", NULL);
     ok(hr == S_OK, "Failed to write element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, "prefix", "h", NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, L"prefix", L"h", NULL, NULL);
     ok(hr == S_OK, "Failed to write element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, "prefix_i", "i", NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, L"prefix_i", L"i", NULL, NULL);
     ok(hr == WR_E_NSPREFIXWITHEMPTYNSURI, "Failed to write element, hr %#lx.\n", hr);
 
-    hr = write_element_string(writer, "", "j", "uri", NULL);
+    hr = IXmlWriter_WriteElementString(writer, L"", L"j", L"uri", NULL);
     ok(hr == S_OK, "Failed to write element, hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -1144,7 +1140,7 @@ static void test_WriteElementString(void)
         hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
         ok(hr == S_OK, "Failed to start document, hr %#lx.\n", hr);
 
-        hr = write_element_string(writer, element_string_tests[i].prefix, element_string_tests[i].local,
+        hr = IXmlWriter_WriteElementString(writer, element_string_tests[i].prefix, element_string_tests[i].local,
                 element_string_tests[i].uri, element_string_tests[i].value);
         ok(hr == element_string_tests[i].hr, "%u: unexpected hr %#lx.\n", i, hr);
 
@@ -1181,10 +1177,10 @@ static void test_WriteEndElement(void)
 
     stream = writer_set_output(writer);
 
-    hr = write_start_element(writer, NULL, "a", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, NULL, "b", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndElement(writer);
@@ -1204,8 +1200,6 @@ static void test_WriteEndElement(void)
 
 static void test_writeenddocument(void)
 {
-    static const WCHAR aW[] = {'a',0};
-    static const WCHAR bW[] = {'b',0};
     IXmlWriter *writer;
     IStream *stream;
     HGLOBAL hglobal;
@@ -1230,16 +1224,16 @@ static void test_writeenddocument(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_SetOutput(writer, (IUnknown*)stream);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, bW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndDocument(writer);
@@ -1263,9 +1257,6 @@ static void test_writeenddocument(void)
 
 static void test_WriteComment(void)
 {
-    static const WCHAR closeW[] = {'-','-','>',0};
-    static const WCHAR aW[] = {'a',0};
-    static const WCHAR bW[] = {'b',0};
     IXmlWriter *writer;
     IStream *stream;
     HRESULT hr;
@@ -1275,7 +1266,7 @@ static void test_WriteComment(void)
 
     writer_set_property(writer, XmlWriterProperty_OmitXmlDeclaration);
 
-    hr = IXmlWriter_WriteComment(writer, aW);
+    hr = IXmlWriter_WriteComment(writer, L"a");
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
     stream = writer_set_output(writer);
@@ -1283,19 +1274,19 @@ static void test_WriteComment(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteComment(writer, aW);
+    hr = IXmlWriter_WriteComment(writer, L"a");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, bW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteComment(writer, aW);
+    hr = IXmlWriter_WriteComment(writer, L"a");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteComment(writer, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteComment(writer, closeW);
+    hr = IXmlWriter_WriteComment(writer, L"-->");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -1309,10 +1300,6 @@ static void test_WriteComment(void)
 
 static void test_WriteCData(void)
 {
-    static const WCHAR closeW[] = {']',']','>',0};
-    static const WCHAR close2W[] = {'a',']',']','>','b',0};
-    static const WCHAR aW[] = {'a',0};
-    static const WCHAR bW[] = {'b',0};
     IXmlWriter *writer;
     IStream *stream;
     HRESULT hr;
@@ -1322,24 +1309,24 @@ static void test_WriteCData(void)
 
     writer_set_property(writer, XmlWriterProperty_OmitXmlDeclaration);
 
-    hr = IXmlWriter_WriteCData(writer, aW);
+    hr = IXmlWriter_WriteCData(writer, L"a");
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, bW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteCData(writer, aW);
+    hr = IXmlWriter_WriteCData(writer, L"a");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteCData(writer, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteCData(writer, closeW);
+    hr = IXmlWriter_WriteCData(writer, L"]]>");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteCData(writer, close2W);
+    hr = IXmlWriter_WriteCData(writer, L"a]]>b");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -1360,8 +1347,9 @@ static void test_WriteCData(void)
 
 static void test_WriteRaw(void)
 {
-    static const WCHAR rawW[] = {'a','<',':',0};
-    static const WCHAR aW[] = {'a',0};
+    static const WCHAR surrogates[] = {0xdc00, 0xd800, '\0'};
+    static const WCHAR invalid[] = {0x8, '\0'};
+    static const WCHAR rawW[] = L"a<:";
     IXmlWriter *writer;
     IStream *stream;
     HRESULT hr;
@@ -1376,6 +1364,15 @@ static void test_WriteRaw(void)
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
     stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteRaw(writer, surrogates);
+    ok(hr == WR_E_INVALIDSURROGATEPAIR, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRaw(writer, L"\uffff");
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRaw(writer, invalid);
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteRaw(writer, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -1392,7 +1389,7 @@ static void test_WriteRaw(void)
     hr = IXmlWriter_WriteRaw(writer, rawW);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteElementString(writer, NULL, aW, NULL, aW);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"a", NULL, L"a");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Yes);
@@ -1409,16 +1406,27 @@ static void test_WriteRaw(void)
 
     hr = IXmlWriter_Flush(writer);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
     CHECK_OUTPUT(stream, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>a<:a<:<!--a<:-->a<:<a>a</a>");
+    IStream_Release(stream);
+
+    /* With open element. */
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"w", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteRaw(writer, L"text");
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<w>text");
+    IStream_Release(stream);
 
     IXmlWriter_Release(writer);
-    IStream_Release(stream);
 }
 
 static void test_writer_state(void)
 {
-    static const WCHAR aW[] = {'a',0};
     IXmlWriter *writer;
     IStream *stream;
     HRESULT hr;
@@ -1441,7 +1449,7 @@ static void test_writer_state(void)
     /* WriteAttributeString */
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteAttributeString(writer, NULL, aW, NULL, aW);
+    hr = IXmlWriter_WriteAttributeString(writer, NULL, L"a", NULL, L"a");
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     check_writer_state(writer, WR_E_INVALIDACTION);
@@ -1468,7 +1476,7 @@ static void test_writer_state(void)
     /* WriteCData */
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteCData(writer, aW);
+    hr = IXmlWriter_WriteCData(writer, L"a");
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     check_writer_state(writer, WR_E_INVALIDACTION);
@@ -1477,7 +1485,7 @@ static void test_writer_state(void)
     /* WriteName */
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteName(writer, aW);
+    hr = IXmlWriter_WriteName(writer, L"a");
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     check_writer_state(writer, WR_E_INVALIDACTION);
@@ -1486,7 +1494,7 @@ static void test_writer_state(void)
     /* WriteNmToken */
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteNmToken(writer, aW);
+    hr = IXmlWriter_WriteNmToken(writer, L"a");
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     check_writer_state(writer, WR_E_INVALIDACTION);
@@ -1495,20 +1503,26 @@ static void test_writer_state(void)
     /* WriteString */
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteString(writer, aW);
+    hr = IXmlWriter_WriteString(writer, L"a");
     ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
     check_writer_state(writer, WR_E_INVALIDACTION);
     IStream_Release(stream);
 
+    /* WriteChars */
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteChars(writer, L"a", 1);
+    ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
+
+    check_writer_state(writer, WR_E_INVALIDACTION);
+
+    IStream_Release(stream);
     IXmlWriter_Release(writer);
 }
 
 static void test_indentation(void)
 {
-    static const WCHAR commentW[] = {'c','o','m','m','e','n','t',0};
-    static const WCHAR aW[] = {'a',0};
-    static const WCHAR bW[] = {'b',0};
     IXmlWriter *writer;
     IStream *stream;
     HRESULT hr;
@@ -1524,13 +1538,13 @@ static void test_indentation(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteComment(writer, commentW);
+    hr = IXmlWriter_WriteComment(writer, L"comment");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, bW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndDocument(writer);
@@ -1550,13 +1564,13 @@ static void test_indentation(void)
     /* WriteElementString */
     stream = writer_set_output(writer);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteElementString(writer, NULL, bW, NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"b", NULL, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteElementString(writer, NULL, bW, NULL, NULL);
+    hr = IXmlWriter_WriteElementString(writer, NULL, L"b", NULL, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndElement(writer);
@@ -1576,35 +1590,14 @@ static void test_indentation(void)
     IXmlWriter_Release(writer);
 }
 
-static HRESULT write_attribute_string(IXmlWriter *writer, const char *prefix, const char *local,
-        const char *uri, const char *value)
-{
-    WCHAR *prefixW, *localW, *uriW, *valueW;
-    HRESULT hr;
-
-    prefixW = strdupAtoW(prefix);
-    localW = strdupAtoW(local);
-    uriW = strdupAtoW(uri);
-    valueW = strdupAtoW(value);
-
-    hr = IXmlWriter_WriteAttributeString(writer, prefixW, localW, uriW, valueW);
-
-    heap_free(prefixW);
-    heap_free(localW);
-    heap_free(uriW);
-    heap_free(valueW);
-
-    return hr;
-}
-
 static void test_WriteAttributeString(void)
 {
     static const struct
     {
-        const char *prefix;
-        const char *local;
-        const char *uri;
-        const char *value;
+        const WCHAR *prefix;
+        const WCHAR *local;
+        const WCHAR *uri;
+        const WCHAR *value;
         const char *output;
         const char *output_partial;
         HRESULT hr;
@@ -1614,62 +1607,62 @@ static void test_WriteAttributeString(void)
     }
     attribute_tests[] =
     {
-        { NULL, "a", NULL, "b", "<e a=\"b\" />", "<e a=\"b\"" },
-        { "", "a", NULL, "b", "<e a=\"b\" />", "<e a=\"b\"" },
-        { NULL, "a", "", "b", "<e a=\"b\" />", "<e a=\"b\"" },
-        { "", "a", "", "b", "<e a=\"b\" />", "<e a=\"b\"" },
-        { "prefix", "local", "uri", "b", "<e prefix:local=\"b\" xmlns:prefix=\"uri\" />", "<e prefix:local=\"b\"" },
-        { NULL, "a", "http://www.w3.org/2000/xmlns/", "defuri", "<e xmlns:a=\"defuri\" />", "<e xmlns:a=\"defuri\"" },
-        { "xmlns", "a", NULL, "uri", "<e xmlns:a=\"uri\" />", "<e xmlns:a=\"uri\"" },
-        { "xmlns", "a", "", "uri", "<e xmlns:a=\"uri\" />", "<e xmlns:a=\"uri\"" },
-        { "prefix", "xmlns", "uri", "value", "<e prefix:xmlns=\"value\" xmlns:prefix=\"uri\" />", "<e prefix:xmlns=\"value\"" },
-        { "prefix", "xmlns", "uri", NULL, "<e prefix:xmlns=\"\" xmlns:prefix=\"uri\" />", "<e prefix:xmlns=\"\"" },
-        { "prefix", "xmlns", "uri", "", "<e prefix:xmlns=\"\" xmlns:prefix=\"uri\" />", "<e prefix:xmlns=\"\"" },
-        { "prefix", "xmlns", NULL, "uri", "<e xmlns=\"uri\" />", "<e xmlns=\"uri\"" },
-        { "prefix", "xmlns", "", "uri", "<e xmlns=\"uri\" />", "<e xmlns=\"uri\"" },
-        { "xml", "space", NULL, "preserve", "<e xml:space=\"preserve\" />", "<e xml:space=\"preserve\"" },
-        { "xml", "space", "", "preserve", "<e xml:space=\"preserve\" />", "<e xml:space=\"preserve\"" },
-        { "xml", "space", NULL, "default", "<e xml:space=\"default\" />", "<e xml:space=\"default\"" },
-        { "xml", "space", "", "default", "<e xml:space=\"default\" />", "<e xml:space=\"default\"" },
-        { "xml", "a", NULL, "value", "<e xml:a=\"value\" />", "<e xml:a=\"value\"" },
-        { "xml", "a", "", "value", "<e xml:a=\"value\" />", "<e xml:a=\"value\"" },
+        { NULL, L"a", NULL, L"b", "<e a=\"b\" />", "<e a=\"b\"" },
+        { L"", L"a", NULL, L"b", "<e a=\"b\" />", "<e a=\"b\"" },
+        { NULL, L"a", L"", L"b", "<e a=\"b\" />", "<e a=\"b\"" },
+        { L"", L"a", L"", L"b", "<e a=\"b\" />", "<e a=\"b\"" },
+        { L"prefix", L"local", L"uri", L"b", "<e prefix:local=\"b\" xmlns:prefix=\"uri\" />", "<e prefix:local=\"b\"" },
+        { NULL, L"a", L"http://www.w3.org/2000/xmlns/", L"defuri", "<e xmlns:a=\"defuri\" />", "<e xmlns:a=\"defuri\"" },
+        { L"xmlns", L"a", NULL, L"uri", "<e xmlns:a=\"uri\" />", "<e xmlns:a=\"uri\"" },
+        { L"xmlns", L"a", L"", L"uri", "<e xmlns:a=\"uri\" />", "<e xmlns:a=\"uri\"" },
+        { L"prefix", L"xmlns", L"uri", L"value", "<e prefix:xmlns=\"value\" xmlns:prefix=\"uri\" />", "<e prefix:xmlns=\"value\"" },
+        { L"prefix", L"xmlns", L"uri", NULL, "<e prefix:xmlns=\"\" xmlns:prefix=\"uri\" />", "<e prefix:xmlns=\"\"" },
+        { L"prefix", L"xmlns", L"uri", L"", "<e prefix:xmlns=\"\" xmlns:prefix=\"uri\" />", "<e prefix:xmlns=\"\"" },
+        { L"prefix", L"xmlns", NULL, L"uri", "<e xmlns=\"uri\" />", "<e xmlns=\"uri\"" },
+        { L"prefix", L"xmlns", L"", L"uri", "<e xmlns=\"uri\" />", "<e xmlns=\"uri\"" },
+        { L"xml", L"space", NULL, L"preserve", "<e xml:space=\"preserve\" />", "<e xml:space=\"preserve\"" },
+        { L"xml", L"space", L"", L"preserve", "<e xml:space=\"preserve\" />", "<e xml:space=\"preserve\"" },
+        { L"xml", L"space", NULL, L"default", "<e xml:space=\"default\" />", "<e xml:space=\"default\"" },
+        { L"xml", L"space", L"", L"default", "<e xml:space=\"default\" />", "<e xml:space=\"default\"" },
+        { L"xml", L"a", NULL, L"value", "<e xml:a=\"value\" />", "<e xml:a=\"value\"" },
+        { L"xml", L"a", L"", L"value", "<e xml:a=\"value\" />", "<e xml:a=\"value\"" },
 
         /* Autogenerated prefix names. */
-        { NULL, "a", "defuri", NULL, "<e p1:a=\"\" xmlns:p1=\"defuri\" />", "<e p1:a=\"\"", S_OK, 1, 1, 1 },
-        { NULL, "a", "defuri", "b", "<e p1:a=\"b\" xmlns:p1=\"defuri\" />", "<e p1:a=\"b\"", S_OK, 1, 1, 1 },
-        { "", "a", "defuri", NULL, "<e p1:a=\"\" xmlns:p1=\"defuri\" />", "<e p1:a=\"\"", S_OK, 1, 1, 1 },
-        { NULL, "a", "defuri", "", "<e p1:a=\"\" xmlns:p1=\"defuri\" />", "<e p1:a=\"\"", S_OK, 1, 1, 1 },
-        { "", "a", "defuri", "b", "<e p1:a=\"b\" xmlns:p1=\"defuri\" />", "<e p1:a=\"b\"", S_OK, 1, 1, 1 },
+        { NULL, L"a", L"defuri", NULL, "<e p1:a=\"\" xmlns:p1=\"defuri\" />", "<e p1:a=\"\"", S_OK, 1, 1, 1 },
+        { NULL, L"a", L"defuri", L"b", "<e p1:a=\"b\" xmlns:p1=\"defuri\" />", "<e p1:a=\"b\"", S_OK, 1, 1, 1 },
+        { L"", L"a", L"defuri", NULL, "<e p1:a=\"\" xmlns:p1=\"defuri\" />", "<e p1:a=\"\"", S_OK, 1, 1, 1 },
+        { NULL, L"a", L"defuri", L"", "<e p1:a=\"\" xmlns:p1=\"defuri\" />", "<e p1:a=\"\"", S_OK, 1, 1, 1 },
+        { L"", L"a", L"defuri", L"b", "<e p1:a=\"b\" xmlns:p1=\"defuri\" />", "<e p1:a=\"b\"", S_OK, 1, 1, 1 },
 
         /* Failing cases. */
-        { NULL, NULL, "http://www.w3.org/2000/xmlns/", "defuri", "<e />", "<e", E_INVALIDARG },
-        { "", "a", "http://www.w3.org/2000/xmlns/", "defuri", "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION, 1, 1, 1 },
-        { "", NULL, "http://www.w3.org/2000/xmlns/", "defuri", "<e />", "<e", E_INVALIDARG },
-        { "", "", "http://www.w3.org/2000/xmlns/", "defuri", "<e />", "<e", E_INVALIDARG, 1, 1, 1 },
-        { NULL, "", "http://www.w3.org/2000/xmlns/", "defuri", "<e />", "<e", E_INVALIDARG, 1, 1, 1 },
-        { "prefix", "a", "http://www.w3.org/2000/xmlns/", "defuri", "<e />", "<e", WR_E_XMLNSURIDECLARATION, 1, 1, 1 },
-        { "prefix", NULL, "http://www.w3.org/2000/xmlns/", "defuri", "<e />", "<e", E_INVALIDARG },
-        { "prefix", NULL, NULL, "b", "<e />", "<e", E_INVALIDARG },
-        { "prefix", NULL, "uri", NULL, "<e />", "<e", E_INVALIDARG },
-        { "xml", NULL, NULL, "value", "<e />", "<e", E_INVALIDARG },
-        { "xmlns", "a", "defuri", NULL, "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION },
-        { "xmlns", "a", "b", "uri", "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION },
-        { NULL, "xmlns", "uri", NULL, "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION, 0, 0, 1 },
-        { "xmlns", NULL, "uri", NULL, "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION, 0, 0, 1 },
-        { "pre:fix", "local", "uri", "b", "<e />", "<e", WC_E_NAMECHARACTER },
-        { "pre:fix", NULL, "uri", "b", "<e />", "<e", E_INVALIDARG },
-        { "prefix", "lo:cal", "uri", "b", "<e />", "<e", WC_E_NAMECHARACTER },
-        { "xmlns", NULL, NULL, "uri", "<e />", "<e", WR_E_NSPREFIXDECLARED },
-        { "xmlns", NULL, "", "uri", "<e />", "<e", WR_E_NSPREFIXDECLARED },
-        { "xmlns", "", NULL, "uri", "<e />", "<e", WR_E_NSPREFIXDECLARED },
-        { "xmlns", "", "", "uri", "<e />", "<e", WR_E_NSPREFIXDECLARED },
-        { "xml", "space", "", "value", "<e />", "<e", WR_E_INVALIDXMLSPACE },
-        { "xml", "space", NULL, "value", "<e />", "<e", WR_E_INVALIDXMLSPACE },
-        { "xml", "a", "uri", "value", "<e />", "<e", WR_E_XMLPREFIXDECLARATION },
-        { "xml", "space", NULL, "preServe", "<e />", "<e", WR_E_INVALIDXMLSPACE },
-        { "xml", "space", NULL, "defAult", "<e />", "<e", WR_E_INVALIDXMLSPACE },
-        { "xml", "space", NULL, NULL, "<e />", "<e", WR_E_INVALIDXMLSPACE },
-        { "xml", "space", NULL, "", "<e />", "<e", WR_E_INVALIDXMLSPACE },
+        { NULL, NULL, L"http://www.w3.org/2000/xmlns/", L"defuri", "<e />", "<e", E_INVALIDARG },
+        { L"", L"a", L"http://www.w3.org/2000/xmlns/", L"defuri", "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION, 1, 1, 1 },
+        { L"", NULL, L"http://www.w3.org/2000/xmlns/", L"defuri", "<e />", "<e", E_INVALIDARG },
+        { L"", L"", L"http://www.w3.org/2000/xmlns/", L"defuri", "<e />", "<e", E_INVALIDARG },
+        { NULL, L"", L"http://www.w3.org/2000/xmlns/", L"defuri", "<e />", "<e", E_INVALIDARG },
+        { L"prefix", L"a", L"http://www.w3.org/2000/xmlns/", L"defuri", "<e />", "<e", WR_E_XMLNSURIDECLARATION, 1, 1, 1 },
+        { L"prefix", NULL, L"http://www.w3.org/2000/xmlns/", L"defuri", "<e />", "<e", E_INVALIDARG },
+        { L"prefix", NULL, NULL, L"b", "<e />", "<e", E_INVALIDARG },
+        { L"prefix", NULL, L"uri", NULL, "<e />", "<e", E_INVALIDARG },
+        { L"xml", NULL, NULL, L"value", "<e />", "<e", E_INVALIDARG },
+        { L"xmlns", L"a", L"defuri", NULL, "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION },
+        { L"xmlns", L"a", L"b", L"uri", "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION },
+        { NULL, L"xmlns", L"uri", NULL, "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION, 0, 0, 1 },
+        { L"xmlns", NULL, L"uri", NULL, "<e />", "<e", WR_E_XMLNSPREFIXDECLARATION, 0, 0, 1 },
+        { L"pre:fix", L"local", L"uri", L"b", "<e />", "<e", WC_E_NAMECHARACTER },
+        { L"pre:fix", NULL, L"uri", L"b", "<e />", "<e", E_INVALIDARG },
+        { L"prefix", L"lo:cal", L"uri", L"b", "<e />", "<e", WC_E_NAMECHARACTER },
+        { L"xmlns", NULL, NULL, L"uri", "<e />", "<e", WR_E_NSPREFIXDECLARED },
+        { L"xmlns", NULL, L"", L"uri", "<e />", "<e", WR_E_NSPREFIXDECLARED },
+        { L"xmlns", L"", NULL, L"uri", "<e />", "<e", WR_E_NSPREFIXDECLARED },
+        { L"xmlns", L"", L"", L"uri", "<e />", "<e", WR_E_NSPREFIXDECLARED },
+        { L"xml", L"space", L"", L"value", "<e />", "<e", WR_E_INVALIDXMLSPACE },
+        { L"xml", L"space", NULL, L"value", "<e />", "<e", WR_E_INVALIDXMLSPACE },
+        { L"xml", L"a", L"uri", L"value", "<e />", "<e", WR_E_XMLPREFIXDECLARATION },
+        { L"xml", L"space", NULL, L"preServe", "<e />", "<e", WR_E_INVALIDXMLSPACE },
+        { L"xml", L"space", NULL, L"defAult", "<e />", "<e", WR_E_INVALIDXMLSPACE },
+        { L"xml", L"space", NULL, NULL, "<e />", "<e", WR_E_INVALIDXMLSPACE },
+        { L"xml", L"space", NULL, L"", "<e />", "<e", WR_E_INVALIDXMLSPACE },
     };
 
     IXmlWriter *writer;
@@ -1684,18 +1677,20 @@ static void test_WriteAttributeString(void)
 
     for (i = 0; i < ARRAY_SIZE(attribute_tests); ++i)
     {
+        winetest_push_context("Test %u", i);
+
         stream = writer_set_output(writer);
 
         hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
         ok(hr == S_OK, "Failed to start document, hr %#lx.\n", hr);
 
-        hr = write_start_element(writer, NULL, "e", NULL);
+        hr = IXmlWriter_WriteStartElement(writer, NULL, L"e", NULL);
         ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-        hr = write_attribute_string(writer, attribute_tests[i].prefix, attribute_tests[i].local,
+        hr = IXmlWriter_WriteAttributeString(writer, attribute_tests[i].prefix, attribute_tests[i].local,
                 attribute_tests[i].uri, attribute_tests[i].value);
         todo_wine_if(attribute_tests[i].todo_hr)
-        ok(hr == attribute_tests[i].hr, "%u: unexpected hr %#lx, expected %#lx.\n", i, hr, attribute_tests[i].hr);
+        ok(hr == attribute_tests[i].hr, "Unexpected hr %#lx, expected %#lx.\n", hr, attribute_tests[i].hr);
 
         hr = IXmlWriter_Flush(writer);
         ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
@@ -1710,6 +1705,8 @@ static void test_WriteAttributeString(void)
 
         check_output(stream, attribute_tests[i].output, attribute_tests[i].todo, __LINE__);
         IStream_Release(stream);
+
+        winetest_pop_context();
     }
 
     /* With namespaces */
@@ -1718,32 +1715,32 @@ static void test_WriteAttributeString(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, "p", "a", "outeruri");
+    hr = IXmlWriter_WriteStartElement(writer, L"p", L"a", L"outeruri");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, "prefix", "local", "uri", "b");
+    hr = IXmlWriter_WriteAttributeString(writer, L"prefix", L"local", L"uri", L"b");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, NULL, "a", NULL, "b");
+    hr = IXmlWriter_WriteAttributeString(writer, NULL, L"a", NULL, L"b");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, "xmlns", "prefix", NULL, "uri");
+    hr = IXmlWriter_WriteAttributeString(writer, L"xmlns", L"prefix", NULL, L"uri");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, "p", "attr", NULL, "value");
+    hr = IXmlWriter_WriteAttributeString(writer, L"p", L"attr", NULL, L"value");
     ok(hr == S_OK, "Failed to write attribute string, hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, "prefix", "local", NULL, "b");
+    hr = IXmlWriter_WriteAttributeString(writer, L"prefix", L"local", NULL, L"b");
     todo_wine
     ok(hr == WR_E_DUPLICATEATTRIBUTE, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, NULL, "b", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, NULL, "attr2", "outeruri", "value");
+    hr = IXmlWriter_WriteAttributeString(writer, NULL, L"attr2", L"outeruri", L"value");
     ok(hr == S_OK, "Failed to write attribute string, hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, "pr", "attr3", "outeruri", "value");
+    hr = IXmlWriter_WriteAttributeString(writer, L"pr", L"attr3", L"outeruri", L"value");
     ok(hr == S_OK, "Failed to write attribute string, hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndDocument(writer);
@@ -1765,13 +1762,13 @@ static void test_WriteAttributeString(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, NULL, "e", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"e", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, "xmlns", "prefix", NULL, "uri");
+    hr = IXmlWriter_WriteAttributeString(writer, L"xmlns", L"prefix", NULL, L"uri");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, "prefix", "attr", NULL, "value");
+    hr = IXmlWriter_WriteAttributeString(writer, L"prefix", L"attr", NULL, L"value");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndDocument(writer);
@@ -1790,7 +1787,6 @@ static void test_WriteAttributeString(void)
 
 static void test_WriteFullEndElement(void)
 {
-    static const WCHAR aW[] = {'a',0};
     IXmlWriter *writer;
     IStream *stream;
     HRESULT hr;
@@ -1807,7 +1803,7 @@ static void test_WriteFullEndElement(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteFullEndElement(writer);
@@ -1832,10 +1828,10 @@ static void test_WriteFullEndElement(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteFullEndElement(writer);
@@ -1851,14 +1847,37 @@ static void test_WriteFullEndElement(void)
         "<a>\r\n"
         "  <a></a>\r\n"
         "</a>");
+    IStream_Release(stream);
+
+    /* Empty strings for prefix and uri. */
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_SetProperty(writer, XmlWriterProperty_Indent, FALSE);
+    ok(hr == S_OK, "Failed to set property, hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteStartElement(writer, L"", L"a", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", L"");
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteStartElement(writer, L"", L"c", L"");
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteFullEndElement(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteFullEndElement(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteFullEndElement(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<a><b><c></c></b></a>");
+    IStream_Release(stream);
 
     IXmlWriter_Release(writer);
-    IStream_Release(stream);
 }
 
 static void test_WriteCharEntity(void)
 {
-    static const WCHAR aW[] = {'a',0};
     IXmlWriter *writer;
     IStream *stream;
     HRESULT hr;
@@ -1874,13 +1893,13 @@ static void test_WriteCharEntity(void)
     hr = IXmlWriter_WriteStartDocument(writer, XmlStandalone_Omit);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteCharEntity(writer, 0x100);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteStartElement(writer, NULL, aW, NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndDocument(writer);
@@ -1896,8 +1915,175 @@ static void test_WriteCharEntity(void)
     IStream_Release(stream);
 }
 
+static void test_WriteRawChars(void)
+{
+    IXmlWriter *writer;
+    IStream *stream;
+    HRESULT hr;
+    static WCHAR surrogates[] = {0xd800, 0xdc00, 0};
+
+    hr = CreateXmlWriter(&IID_IXmlWriter, (void**)&writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"", 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, NULL, 5);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"", 6);
+    ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"sub", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"<rawChars>", 5);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream, "<sub><rawC");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"a", 1);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"sub", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"<;;>", 10);
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>a<sub><;;>");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"sub", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, surrogates, 1);
+    ok(hr == WR_E_INVALIDSURROGATEPAIR, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, surrogates, 2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream, "<sub>\U00010000");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"sub", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"", 5);
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream, "<sub>");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"sub", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"", 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream, "<sub");
+
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    /* Force document close */
+    hr = IXmlWriter_WriteEndElement(writer);
+    ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteRawChars(writer, L"a", 1);
+    ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
+
+    IStream_Release(stream);
+    IXmlWriter_Release(writer);
+}
+
+static void test_WriteSurrogateCharEntity(void)
+{
+    IXmlWriter *writer;
+    IStream *stream;
+    HRESULT hr;
+    WCHAR low = 0xdcef;
+    WCHAR high = 0xdaff;
+
+    hr = CreateXmlWriter(&IID_IXmlWriter, (void**)&writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteSurrogateCharEntity(writer, high, low);
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteSurrogateCharEntity(writer, low, high);
+    ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"root", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteSurrogateCharEntity(writer, high, low);
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream, "<root");
+
+    hr = IXmlWriter_WriteSurrogateCharEntity(writer, low, high);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteFullEndElement(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream, "<root>&#xCFCEF;</root>");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteEndElement(writer);
+    ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteSurrogateCharEntity(writer, low, high);
+    ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
+
+    IXmlWriter_Release(writer);
+    IStream_Release(stream);
+}
+
 static void test_WriteString(void)
 {
+    static const WCHAR surrogates[] = {0xd800, 0xdc00, 'x', 'y', '\0'};
     IXmlWriter *writer;
     IStream *stream;
     HRESULT hr;
@@ -1907,31 +2093,52 @@ static void test_WriteString(void)
 
     writer_set_property(writer, XmlWriterProperty_OmitXmlDeclaration);
 
-    hr = write_string(writer, "a");
+    hr = IXmlWriter_WriteString(writer, L"a");
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_string(writer, NULL);
+    hr = IXmlWriter_WriteString(writer, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_string(writer, "");
+    hr = IXmlWriter_WriteString(writer, L"");
     ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
 
     stream = writer_set_output(writer);
 
-    hr = write_start_element(writer, NULL, "b", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"sub", NULL);
+    ok(hr == S_OK, "Unexpected hr #%lx.\n", hr);
+
+    hr = IXmlWriter_WriteString(writer, L"\v");
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteString(writer, L"\ufffe");
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteString(writer, surrogates);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_string(writer, NULL);
+    hr = IXmlWriter_Flush(writer);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_string(writer, "");
+    CHECK_OUTPUT(stream,
+        "<sub>\U00010000xy");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_string(writer, "a");
+    hr = IXmlWriter_WriteString(writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteString(writer, L"");
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteString(writer, L"a");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     /* WriteString automatically escapes markup characters */
-    hr = write_string(writer, "<&\">=");
+    hr = IXmlWriter_WriteString(writer, L"<&\">=");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -1943,10 +2150,10 @@ static void test_WriteString(void)
 
     stream = writer_set_output(writer);
 
-    hr = write_start_element(writer, NULL, "b", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = write_string(writer, NULL);
+    hr = IXmlWriter_WriteString(writer, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -1955,7 +2162,7 @@ static void test_WriteString(void)
     CHECK_OUTPUT(stream,
         "<b");
 
-    hr = write_string(writer, "");
+    hr = IXmlWriter_WriteString(writer, L"");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -1975,13 +2182,13 @@ static void test_WriteString(void)
 
     writer_set_property(writer, XmlWriterProperty_Indent);
 
-    hr = write_start_element(writer, NULL, "a", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, NULL, "b", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_string(writer, "text");
+    hr = IXmlWriter_WriteString(writer, L"text");
     ok(hr == S_OK, "Failed to write a string, hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -2016,10 +2223,10 @@ static void test_WriteString(void)
 
     stream = writer_set_output(writer);
 
-    hr = write_start_element(writer, NULL, "a", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"a", NULL);
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_start_element(writer, NULL, "b", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"b", NULL);
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndElement(writer);
@@ -2032,10 +2239,10 @@ static void test_WriteString(void)
         "<a>\r\n"
         "  <b />");
 
-    hr = write_start_element(writer, NULL, "c", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"c", NULL);
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_attribute_string(writer, NULL, "attr", NULL, "value");
+    hr = IXmlWriter_WriteAttributeString(writer, NULL, L"attr", NULL, L"value");
     ok(hr == S_OK, "Failed to write attribute string, hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -2046,7 +2253,7 @@ static void test_WriteString(void)
         "  <b />\r\n"
         "  <c attr=\"value\"");
 
-    hr = write_string(writer, "text");
+    hr = IXmlWriter_WriteString(writer, L"text");
     ok(hr == S_OK, "Failed to write a string, hr %#lx.\n", hr);
 
     hr = IXmlWriter_Flush(writer);
@@ -2068,10 +2275,10 @@ static void test_WriteString(void)
         "  <b />\r\n"
         "  <c attr=\"value\">text</c>");
 
-    hr = write_start_element(writer, NULL, "d", NULL);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"d", NULL);
     ok(hr == S_OK, "Failed to start element, hr %#lx.\n", hr);
 
-    hr = write_string(writer, "");
+    hr = IXmlWriter_WriteString(writer, L"");
     ok(hr == S_OK, "Failed to write a string, hr %#lx.\n", hr);
 
     hr = IXmlWriter_WriteEndElement(writer);
@@ -2103,60 +2310,161 @@ static void test_WriteString(void)
     IStream_Release(stream);
 }
 
-static HRESULT write_doctype(IXmlWriter *writer, const char *name, const char *pubid, const char *sysid,
-        const char *subset)
+static void test_WriteChars(void)
 {
-    WCHAR *nameW, *pubidW, *sysidW, *subsetW;
+    IXmlWriter *writer;
+    IStream *stream;
     HRESULT hr;
+    static WCHAR raw[] = {'s', 'a', 'm', 0xd800, 0xdc00, 'p', 'l', 'e', 0};
 
-    nameW = strdupAtoW(name);
-    pubidW = strdupAtoW(pubid);
-    sysidW = strdupAtoW(sysid);
-    subsetW = strdupAtoW(subset);
+    hr = CreateXmlWriter(&IID_IXmlWriter, (void**)&writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteDocType(writer, nameW, pubidW, sysidW, subsetW);
+    hr = IXmlWriter_WriteChars(writer, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    heap_free(nameW);
-    heap_free(pubidW);
-    heap_free(sysidW);
-    heap_free(subsetW);
+    hr = IXmlWriter_WriteChars(writer, NULL, 5);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
-    return hr;
+    hr = IXmlWriter_WriteChars(writer, L"", 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, L"", 5);
+    ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteChars(writer, L"a", 1);
+    ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"chars", NULL);
+    ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
+
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"chars", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, NULL, 5);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, L"<chars>", 20);
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, L"<chars>", 7);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream,
+        "<chars>&lt;chars&gt;&lt;chars&gt;");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"chars", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, raw, 8);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    raw[3] = 0xdc00;
+    raw[4] = 0xd800;
+    hr = IXmlWriter_WriteChars(writer, raw, 8);
+    ok(hr == WR_E_INVALIDSURROGATEPAIR, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream, "<chars>sam\U00010000plesam");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"chars", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteFullEndElement(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream,
+        "<chars></chars>");
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"chars", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, L"", 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream,
+        "<chars");
+
+    IStream_Release(stream);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"c", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteChars(writer, L"", 5);
+    ok(hr == WC_E_XMLCHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    CHECK_OUTPUT(stream,
+        "<c>");
+
+    IXmlWriter_Release(writer);
+    IStream_Release(stream);
 }
 
 static void test_WriteDocType(void)
 {
     static const struct
     {
-        const char *name;
-        const char *pubid;
-        const char *sysid;
-        const char *subset;
+        const WCHAR *name;
+        const WCHAR *pubid;
+        const WCHAR *sysid;
+        const WCHAR *subset;
         const char *output;
     }
     doctype_tests[] =
     {
-        { "a", "", NULL, NULL, "<!DOCTYPE a PUBLIC \"\" \"\">" },
-        { "a", NULL, NULL, NULL, "<!DOCTYPE a>" },
-        { "a", NULL, "", NULL, "<!DOCTYPE a SYSTEM \"\">" },
-        { "a", "", "", NULL, "<!DOCTYPE a PUBLIC \"\" \"\">" },
-        { "a", "pubid", "", NULL, "<!DOCTYPE a PUBLIC \"pubid\" \"\">" },
-        { "a", "pubid", NULL, NULL, "<!DOCTYPE a PUBLIC \"pubid\" \"\">" },
-        { "a", "", "sysid", NULL, "<!DOCTYPE a PUBLIC \"\" \"sysid\">" },
-        { "a", NULL, NULL, "", "<!DOCTYPE a []>" },
-        { "a", NULL, NULL, "subset", "<!DOCTYPE a [subset]>" },
-        { "a", "", NULL, "subset", "<!DOCTYPE a PUBLIC \"\" \"\" [subset]>" },
-        { "a", NULL, "", "subset", "<!DOCTYPE a SYSTEM \"\" [subset]>" },
-        { "a", "", "", "subset", "<!DOCTYPE a PUBLIC \"\" \"\" [subset]>" },
-        { "a", "pubid", NULL, "subset", "<!DOCTYPE a PUBLIC \"pubid\" \"\" [subset]>" },
-        { "a", "pubid", "", "subset", "<!DOCTYPE a PUBLIC \"pubid\" \"\" [subset]>" },
-        { "a", NULL, "sysid", "subset", "<!DOCTYPE a SYSTEM \"sysid\" [subset]>" },
-        { "a", "", "sysid", "subset", "<!DOCTYPE a PUBLIC \"\" \"sysid\" [subset]>" },
-        { "a", "pubid", "sysid", "subset", "<!DOCTYPE a PUBLIC \"pubid\" \"sysid\" [subset]>" },
+        { L"a", L"", NULL, NULL, "<!DOCTYPE a PUBLIC \"\" \"\">" },
+        { L"a", NULL, NULL, NULL, "<!DOCTYPE a>" },
+        { L"a", NULL, L"", NULL, "<!DOCTYPE a SYSTEM \"\">" },
+        { L"a", L"", L"", NULL, "<!DOCTYPE a PUBLIC \"\" \"\">" },
+        { L"a", L"pubid", L"", NULL, "<!DOCTYPE a PUBLIC \"pubid\" \"\">" },
+        { L"a", L"pubid", NULL, NULL, "<!DOCTYPE a PUBLIC \"pubid\" \"\">" },
+        { L"a", L"", L"sysid", NULL, "<!DOCTYPE a PUBLIC \"\" \"sysid\">" },
+        { L"a", NULL, NULL, L"", "<!DOCTYPE a []>" },
+        { L"a", NULL, NULL, L"subset", "<!DOCTYPE a [subset]>" },
+        { L"a", L"", NULL, L"subset", "<!DOCTYPE a PUBLIC \"\" \"\" [subset]>" },
+        { L"a", NULL, L"", L"subset", "<!DOCTYPE a SYSTEM \"\" [subset]>" },
+        { L"a", L"", L"", L"subset", "<!DOCTYPE a PUBLIC \"\" \"\" [subset]>" },
+        { L"a", L"pubid", NULL, L"subset", "<!DOCTYPE a PUBLIC \"pubid\" \"\" [subset]>" },
+        { L"a", L"pubid", L"", L"subset", "<!DOCTYPE a PUBLIC \"pubid\" \"\" [subset]>" },
+        { L"a", NULL, L"sysid", L"subset", "<!DOCTYPE a SYSTEM \"sysid\" [subset]>" },
+        { L"a", L"", L"sysid", L"subset", "<!DOCTYPE a PUBLIC \"\" \"sysid\" [subset]>" },
+        { L"a", L"pubid", L"sysid", L"subset", "<!DOCTYPE a PUBLIC \"pubid\" \"sysid\" [subset]>" },
     };
     static const WCHAR pubidW[] = {'p',0x100,'i','d',0};
-    static const WCHAR nameW[] = {'-','a',0};
-    static const WCHAR emptyW[] = { 0 };
     IXmlWriter *writer;
     IStream *stream;
     unsigned int i;
@@ -2170,16 +2478,24 @@ static void test_WriteDocType(void)
     hr = IXmlWriter_WriteDocType(writer, NULL, NULL, NULL, NULL);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
-    hr = IXmlWriter_WriteDocType(writer, emptyW, NULL, NULL, NULL);
+    hr = IXmlWriter_WriteDocType(writer, L"", NULL, NULL, NULL);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
     /* Name validation. */
-    hr = IXmlWriter_WriteDocType(writer, nameW, NULL, NULL, NULL);
+    hr = IXmlWriter_WriteDocType(writer, L"-a", NULL, NULL, NULL);
     ok(hr == WC_E_NAMECHARACTER, "Unexpected hr %#lx.\n", hr);
 
     /* Pubid validation. */
-    hr = IXmlWriter_WriteDocType(writer, aW, pubidW, NULL, NULL);
+    hr = IXmlWriter_WriteDocType(writer, L"a", pubidW, NULL, NULL);
     ok(hr == WC_E_PUBLICID, "Unexpected hr %#lx.\n", hr);
+
+    /* Invalid multi-character string */
+    hr = IXmlWriter_WriteDocType(writer, L":ax>m", NULL, NULL, NULL);
+    ok(hr == WC_E_NAMECHARACTER, "Unexpected hr %#lx.\n", hr);
+
+    /* Valid multi-character string */
+    hr = IXmlWriter_WriteDocType(writer, L"root", NULL, NULL, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     IStream_Release(stream);
 
@@ -2187,7 +2503,7 @@ static void test_WriteDocType(void)
     {
         stream = writer_set_output(writer);
 
-        hr = write_doctype(writer, doctype_tests[i].name, doctype_tests[i].pubid, doctype_tests[i].sysid,
+        hr = IXmlWriter_WriteDocType(writer, doctype_tests[i].name, doctype_tests[i].pubid, doctype_tests[i].sysid,
                 doctype_tests[i].subset);
         ok(hr == S_OK, "%u: failed to write doctype, hr %#lx.\n", i, hr);
 
@@ -2196,13 +2512,432 @@ static void test_WriteDocType(void)
 
         CHECK_OUTPUT(stream, doctype_tests[i].output);
 
-        hr = write_doctype(writer, doctype_tests[i].name, doctype_tests[i].pubid, doctype_tests[i].sysid,
+        hr = IXmlWriter_WriteDocType(writer, doctype_tests[i].name, doctype_tests[i].pubid, doctype_tests[i].sysid,
                 doctype_tests[i].subset);
         ok(hr == WR_E_INVALIDACTION, "Unexpected hr %#lx.\n", hr);
 
         IStream_Release(stream);
     }
 
+    IXmlWriter_Release(writer);
+}
+
+static void test_WriteWhitespace(void)
+{
+    IXmlWriter *writer;
+    IStream *stream;
+    HRESULT hr;
+
+    hr = CreateXmlWriter(&IID_IXmlWriter, (void **)&writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteWhitespace(writer, L" ");
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteWhitespace(writer, L"ab");
+    ok(hr == WR_E_NONWHITESPACE, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"w", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteWhitespace(writer, L"\t");
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, " <w>\t");
+    IStream_Release(stream);
+
+    IXmlWriter_Release(writer);
+}
+
+static void test_WriteProcessingInstruction(void)
+{
+    IXmlWriter *writer;
+    IStream *stream;
+    HRESULT hr;
+
+    hr = CreateXmlWriter(&IID_IXmlWriter, (void **)&writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    stream = writer_set_output(writer);
+
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"w", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteProcessingInstruction(writer, L"pi", L"content");
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<w><?pi content?>");
+    IStream_Release(stream);
+
+    IXmlWriter_Release(writer);
+}
+
+static void test_WriteAttributes(void)
+{
+    XmlNodeType node_type;
+    IXmlWriter *writer;
+    IXmlReader *reader;
+    const WCHAR *name;
+    IStream *stream;
+    HRESULT hr;
+
+    hr = CreateXmlWriter(&IID_IXmlWriter, (void **)&writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = CreateXmlReader(&IID_IXmlReader, (void **)&reader, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    /* No attributes. */
+    reader_set_input(reader, "<a/>");
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteAttributes(writer, reader, FALSE);
+    ok(hr == E_UNEXPECTED, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlReader_Read(reader, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteAttributes(writer, reader, FALSE);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "");
+    IStream_Release(stream);
+
+    /* Position on element with attributes. */
+    reader_set_input(reader, "<a attr1=\'b\' attr2=\'c\' attr3=\'d\' />");
+    stream = writer_set_output(writer);
+    hr = IXmlReader_Read(reader, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"w", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteAttributes(writer, reader, FALSE);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Element, "Unexpected node type %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<w attr1=\"b\" attr2=\"c\" attr3=\"d\"");
+    IStream_Release(stream);
+
+    /* Position on second attribute. */
+    hr = IXmlReader_MoveToAttributeByName(reader, L"attr2", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteStartElement(writer, NULL, L"w", NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlWriter_WriteAttributes(writer, reader, FALSE);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Attribute, "Unexpected node type %d.\n", node_type);
+    hr = IXmlReader_GetLocalName(reader, &name, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(name, L"attr3"), "Unexpected node %s.\n", debugstr_w(name));
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<w attr2=\"c\" attr3=\"d\"");
+    IStream_Release(stream);
+
+    IXmlWriter_Release(writer);
+    IXmlReader_Release(reader);
+}
+
+static void test_WriteNode(void)
+{
+    static const struct
+    {
+        const char *input;
+        const char *output;
+        XmlNodeType node_type;
+    }
+    write_node_tests[] =
+    {
+        { "<r><!-- comment --></r>", "<w><!-- comment -->", XmlNodeType_Comment },
+        { "<r>text</r>", "<w>text", XmlNodeType_Text },
+        { "<r>  </r>", "<w>  ", XmlNodeType_Whitespace },
+        { "<r><![CDATA[ cdata ]]></r>", "<w><![CDATA[ cdata ]]>", XmlNodeType_CDATA },
+        { "<r><?pi  pidata  ?></r>", "<w><?pi pidata  ?>", XmlNodeType_ProcessingInstruction },
+        { "<r><e1><e2 attr1=\'a\'/></e1></r>", "<w><e1><e2 attr1=\"a\" /></e1>", XmlNodeType_Element },
+        { "<r><e1/></r>", "<w><e1 />", XmlNodeType_Element },
+        { "<r></r>", "<w></w>", XmlNodeType_EndElement },
+    };
+    XmlNodeType node_type;
+    IXmlWriter *writer;
+    IXmlReader *reader;
+    const WCHAR *name;
+    IStream *stream;
+    unsigned int i;
+    HRESULT hr;
+
+    hr = CreateXmlWriter(&IID_IXmlWriter, (void **)&writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteNode(writer, NULL, FALSE);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = CreateXmlReader(&IID_IXmlReader, (void **)&reader, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(write_node_tests); ++i)
+    {
+        winetest_push_context("Test %s", debugstr_a(write_node_tests[i].input));
+
+        stream = writer_set_output(writer);
+        reader_set_input(reader, write_node_tests[i].input);
+
+        /* Skip top level element. */
+        hr = IXmlReader_Read(reader, &node_type);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+        hr = IXmlReader_Read(reader, &node_type);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(node_type == write_node_tests[i].node_type, "Unexpected node type %d.\n", node_type);
+
+        /* Always write a root node to give a valid context for following nodes. */
+        hr = IXmlWriter_WriteStartElement(writer, NULL, L"w", NULL);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        hr = IXmlWriter_WriteNode(writer, reader, FALSE);
+        ok(SUCCEEDED(hr), "Failed to write a node, hr %#lx.\n", hr);
+
+        if (hr == S_OK)
+        {
+            hr = IXmlReader_GetNodeType(reader, &node_type);
+            ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+            ok(node_type == XmlNodeType_EndElement, "Unexpected node type on return %d.\n", node_type);
+            hr = IXmlReader_GetLocalName(reader, &name, NULL);
+            ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+            ok(!wcscmp(name, L"r"), "Unexpected node name %s.\n", debugstr_w(name));
+        }
+
+        hr = IXmlWriter_Flush(writer);
+        ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+
+        CHECK_OUTPUT(stream, write_node_tests[i].output);
+
+        IStream_Release(stream);
+
+        winetest_pop_context();
+    }
+
+    /* Current node is an attribute. */
+    reader_set_input(reader, "<a attr=\'b\' ></a>");
+    hr = IXmlReader_Read(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Element, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlReader_MoveToFirstAttribute(reader);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteNode(writer, reader, FALSE);
+    ok(hr == S_OK, "Failed to write a node, hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_EndElement, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "");
+    IStream_Release(stream);
+
+    /* Xml declaration node. */
+    reader_set_input(reader, "<?xml version=\"1.0\" ?><a/>");
+    hr = IXmlReader_Read(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_XmlDeclaration, "Unexpected node type on return %d.\n", node_type);
+
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteNode(writer, reader, FALSE);
+    ok(hr == S_OK, "Failed to write a node, hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Element, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    IStream_Release(stream);
+
+    /* With standalone attribute. */
+    reader_set_input(reader, "<?xml version=\"1.0\" standalone=\'yes\'?><a/>");
+    hr = IXmlReader_Read(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_XmlDeclaration, "Unexpected node type on return %d.\n", node_type);
+
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteNode(writer, reader, FALSE);
+    ok(hr == S_OK, "Failed to write a node, hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Element, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+    IStream_Release(stream);
+
+    /* Initial state. */
+    reader_set_input(reader, "<?xml version=\"1.0\" ?><a><b/></a>");
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_None, "Unexpected node type on return %d.\n", node_type);
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteNode(writer, reader, FALSE);
+    ok(hr == S_FALSE, "Failed to write a node, hr %#lx.\n", hr);
+    node_type = XmlNodeType_Element;
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    todo_wine
+    ok(hr == S_FALSE, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_None, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<?xml version=\"1.0\" encoding=\"UTF-8\"?><a><b /></a>");
+    IStream_Release(stream);
+
+    IXmlReader_Release(reader);
+    IXmlWriter_Release(writer);
+}
+
+static void test_WriteNodeShallow(void)
+{
+    static const struct
+    {
+        const char *input;
+        const char *output;
+        XmlNodeType node_type;
+    }
+    write_node_tests[] =
+    {
+        { "<r><!-- comment --></r>", "<w><!-- comment -->", XmlNodeType_Comment },
+        { "<r>text</r>", "<w>text", XmlNodeType_Text },
+        { "<r>  </r>", "<w>  ", XmlNodeType_Whitespace },
+        { "<r><![CDATA[ cdata ]]></r>", "<w><![CDATA[ cdata ]]>", XmlNodeType_CDATA },
+        { "<r><?pi  pidata  ?></r>", "<w><?pi pidata  ?>", XmlNodeType_ProcessingInstruction },
+        { "<r><e1><e2 attr1=\'a\'/></e1></r>", "<w><e1", XmlNodeType_Element },
+        { "<r><e1/></r>", "<w><e1 />", XmlNodeType_Element },
+        { "<r><e1 attr1=\'a\'/></r>", "<w><e1 attr1=\"a\" />", XmlNodeType_Element },
+        { "<r><e1 attr1=\'a\'></e1></r>", "<w><e1 attr1=\"a\"", XmlNodeType_Element },
+        { "<r></r>", "<w></w>", XmlNodeType_EndElement },
+    };
+    XmlNodeType node_type;
+    IXmlWriter *writer;
+    IXmlReader *reader;
+    IStream *stream;
+    unsigned int i;
+    HRESULT hr;
+
+    hr = CreateXmlWriter(&IID_IXmlWriter, (void **)&writer, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IXmlWriter_WriteNodeShallow(writer, NULL, FALSE);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = CreateXmlReader(&IID_IXmlReader, (void **)&reader, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(write_node_tests); ++i)
+    {
+        winetest_push_context("Test %s", debugstr_a(write_node_tests[i].input));
+
+        stream = writer_set_output(writer);
+        reader_set_input(reader, write_node_tests[i].input);
+
+        /* Skip top level element. */
+        hr = IXmlReader_Read(reader, &node_type);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+        hr = IXmlReader_Read(reader, &node_type);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(node_type == write_node_tests[i].node_type, "Unexpected node type %d.\n", node_type);
+
+        /* Always write a root node to give a valid context for following nodes. */
+        hr = IXmlWriter_WriteStartElement(writer, NULL, L"w", NULL);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        hr = IXmlWriter_WriteNodeShallow(writer, reader, FALSE);
+        ok(hr == S_OK, "Failed to write a node, hr %#lx.\n", hr);
+
+        hr = IXmlReader_GetNodeType(reader, &node_type);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(node_type == write_node_tests[i].node_type, "Unexpected node type on return %d.\n", node_type);
+
+        hr = IXmlWriter_Flush(writer);
+        ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+
+        CHECK_OUTPUT(stream, write_node_tests[i].output);
+
+        IStream_Release(stream);
+
+        winetest_pop_context();
+    }
+
+    /* Current node is an attribute. */
+    reader_set_input(reader, "<a attr=\'b\' ></a>");
+    hr = IXmlReader_Read(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Element, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlReader_MoveToFirstAttribute(reader);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteNodeShallow(writer, reader, FALSE);
+    ok(hr == S_OK, "Failed to write a node, hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Attribute, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "");
+    IStream_Release(stream);
+
+    /* Xml declaration node. */
+    reader_set_input(reader, "<?xml version=\"1.0\" ?><a/>");
+    hr = IXmlReader_Read(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_XmlDeclaration, "Unexpected node type on return %d.\n", node_type);
+
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteNodeShallow(writer, reader, FALSE);
+    ok(hr == S_OK, "Failed to write a node, hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Attribute, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    IStream_Release(stream);
+
+    /* With standalone attribute. */
+    reader_set_input(reader, "<?xml version=\"1.0\" standalone=\'yes\'?><a/>");
+    hr = IXmlReader_Read(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_XmlDeclaration, "Unexpected node type on return %d.\n", node_type);
+
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteNodeShallow(writer, reader, FALSE);
+    ok(hr == S_OK, "Failed to write a node, hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_Attribute, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+    IStream_Release(stream);
+
+    /* Initial state. */
+    reader_set_input(reader, "<?xml version=\"1.0\" ?><a><b/></a>");
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_None, "Unexpected node type on return %d.\n", node_type);
+    stream = writer_set_output(writer);
+    hr = IXmlWriter_WriteNodeShallow(writer, reader, FALSE);
+    ok(hr == S_OK, "Failed to write a node, hr %#lx.\n", hr);
+    node_type = XmlNodeType_Element;
+    hr = IXmlReader_GetNodeType(reader, &node_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(node_type == XmlNodeType_None, "Unexpected node type on return %d.\n", node_type);
+    hr = IXmlWriter_Flush(writer);
+    ok(hr == S_OK, "Failed to flush, hr %#lx.\n", hr);
+    CHECK_OUTPUT(stream, "");
+    IStream_Release(stream);
+
+    IXmlReader_Release(reader);
     IXmlWriter_Release(writer);
 }
 
@@ -2226,6 +2961,14 @@ START_TEST(writer)
     test_WriteAttributeString();
     test_WriteFullEndElement();
     test_WriteCharEntity();
+    test_WriteChars();
+    test_WriteRawChars();
+    test_WriteSurrogateCharEntity();
     test_WriteString();
     test_WriteDocType();
+    test_WriteWhitespace();
+    test_WriteProcessingInstruction();
+    test_WriteAttributes();
+    test_WriteNode();
+    test_WriteNodeShallow();
 }

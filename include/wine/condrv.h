@@ -159,6 +159,13 @@ struct condrv_output_info_params
 #define SET_CONSOLE_OUTPUT_INFO_POPUP_ATTR      0x0040
 #define SET_CONSOLE_OUTPUT_INFO_FONT            0x0080
 
+/* IOCTL_CONDRV_GET_TITLE params */
+struct condrv_title_params
+{
+    unsigned int title_len;
+    WCHAR buffer[1];
+};
+
 /* IOCTL_CONDRV_FILL_OUTPUT params */
 struct condrv_fill_output_params
 {
@@ -188,7 +195,9 @@ struct condrv_ctrl_event
 };
 
 /* Wine specific values for console inheritance (params->ConsoleHandle) */
-#define CONSOLE_HANDLE_ALLOC  ((HANDLE)1)
-#define CONSOLE_HANDLE_SHELL  ((HANDLE)2)
+#define CONSOLE_HANDLE_ALLOC            LongToHandle(-1)
+#define CONSOLE_HANDLE_ALLOC_NO_WINDOW  LongToHandle(-2)
+#define CONSOLE_HANDLE_SHELL            LongToHandle(-3)
+#define CONSOLE_HANDLE_SHELL_NO_WINDOW  LongToHandle(-4)
 
 #endif /* _INC_CONDRV */

@@ -189,6 +189,13 @@ static void dump_apc_call( const char *prefix, const apc_call_t *call )
         dump_uint64( ",zero_bits=", &call->virtual_alloc.zero_bits );
         fprintf( stderr, ",op_type=%x,prot=%x", call->virtual_alloc.op_type, call->virtual_alloc.prot );
         break;
+    case APC_VIRTUAL_ALLOC_EX:
+        dump_uint64( "APC_VIRTUAL_ALLOC,addr==", &call->virtual_alloc_ex.addr );
+        dump_uint64( ",size=", &call->virtual_alloc_ex.size );
+        dump_uint64( ",limit=", &call->virtual_alloc_ex.limit );
+        dump_uint64( ",align=", &call->virtual_alloc_ex.align );
+        fprintf( stderr, ",op_type=%x,prot=%x", call->virtual_alloc_ex.op_type, call->virtual_alloc_ex.prot );
+        break;
     case APC_VIRTUAL_FREE:
         dump_uint64( "APC_VIRTUAL_FREE,addr=", &call->virtual_free.addr );
         dump_uint64( ",size=", &call->virtual_free.size );
@@ -2055,6 +2062,24 @@ static void dump_send_socket_reply( const struct send_socket_reply *req )
     fprintf( stderr, ", nonblocking=%d", req->nonblocking );
 }
 
+static void dump_socket_send_icmp_id_request( const struct socket_send_icmp_id_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", icmp_id=%04x", req->icmp_id );
+    fprintf( stderr, ", icmp_seq=%04x", req->icmp_seq );
+}
+
+static void dump_socket_get_icmp_id_request( const struct socket_get_icmp_id_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", icmp_seq=%04x", req->icmp_seq );
+}
+
+static void dump_socket_get_icmp_id_reply( const struct socket_get_icmp_id_reply *req )
+{
+    fprintf( stderr, " icmp_id=%04x", req->icmp_id );
+}
+
 static void dump_get_next_console_request_request( const struct get_next_console_request_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -2295,7 +2320,6 @@ static void dump_create_key_request( const struct create_key_request *req )
 static void dump_create_key_reply( const struct create_key_reply *req )
 {
     fprintf( stderr, " hkey=%04x", req->hkey );
-    fprintf( stderr, ", created=%d", req->created );
 }
 
 static void dump_open_key_request( const struct open_key_request *req )
@@ -2412,6 +2436,12 @@ static void dump_set_registry_notification_request( const struct set_registry_no
     fprintf( stderr, ", event=%04x", req->event );
     fprintf( stderr, ", subtree=%d", req->subtree );
     fprintf( stderr, ", filter=%08x", req->filter );
+}
+
+static void dump_rename_key_request( const struct rename_key_request *req )
+{
+    fprintf( stderr, " hkey=%04x", req->hkey );
+    dump_varargs_unicode_str( ", name=", cur_size );
 }
 
 static void dump_create_timer_request( const struct create_timer_request *req )
@@ -2732,6 +2762,12 @@ static void dump_set_serial_info_request( const struct set_serial_info_request *
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", flags=%d", req->flags );
+}
+
+static void dump_cancel_sync_request( const struct cancel_sync_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", iosb=", &req->iosb );
 }
 
 static void dump_register_async_request( const struct register_async_request *req )
@@ -3864,6 +3900,7 @@ static void dump_get_token_sid_reply( const struct get_token_sid_reply *req )
 static void dump_get_token_groups_request( const struct get_token_groups_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", attr_mask=%08x", req->attr_mask );
 }
 
 static void dump_get_token_groups_reply( const struct get_token_groups_reply *req )
@@ -3978,7 +4015,8 @@ static void dump_get_directory_entry_request( const struct get_directory_entry_r
 
 static void dump_get_directory_entry_reply( const struct get_directory_entry_reply *req )
 {
-    fprintf( stderr, " name_len=%u", req->name_len );
+    fprintf( stderr, " total_len=%u", req->total_len );
+    fprintf( stderr, ", name_len=%u", req->name_len );
     dump_varargs_unicode_str( ", name=", min(cur_size,req->name_len) );
     dump_varargs_unicode_str( ", type=", cur_size );
 }
@@ -4383,16 +4421,6 @@ static void dump_update_rawinput_devices_request( const struct update_rawinput_d
     dump_varargs_rawinput_devices( " devices=", cur_size );
 }
 
-static void dump_get_rawinput_devices_request( const struct get_rawinput_devices_request *req )
-{
-}
-
-static void dump_get_rawinput_devices_reply( const struct get_rawinput_devices_reply *req )
-{
-    fprintf( stderr, " device_count=%08x", req->device_count );
-    dump_varargs_rawinput_devices( ", devices=", cur_size );
-}
-
 static void dump_create_job_request( const struct create_job_request *req )
 {
     fprintf( stderr, " access=%08x", req->access );
@@ -4541,6 +4569,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_unlock_file_request,
     (dump_func)dump_recv_socket_request,
     (dump_func)dump_send_socket_request,
+    (dump_func)dump_socket_send_icmp_id_request,
+    (dump_func)dump_socket_get_icmp_id_request,
     (dump_func)dump_get_next_console_request_request,
     (dump_func)dump_read_directory_changes_request,
     (dump_func)dump_read_change_request,
@@ -4576,6 +4606,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_unload_registry_request,
     (dump_func)dump_save_registry_request,
     (dump_func)dump_set_registry_notification_request,
+    (dump_func)dump_rename_key_request,
     (dump_func)dump_create_timer_request,
     (dump_func)dump_open_timer_request,
     (dump_func)dump_set_timer_request,
@@ -4605,6 +4636,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_is_window_hung_request,
     (dump_func)dump_get_serial_info_request,
     (dump_func)dump_set_serial_info_request,
+    (dump_func)dump_cancel_sync_request,
     (dump_func)dump_register_async_request,
     (dump_func)dump_cancel_async_request,
     (dump_func)dump_get_async_result_request,
@@ -4748,7 +4780,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_cursor_history_request,
     (dump_func)dump_get_rawinput_buffer_request,
     (dump_func)dump_update_rawinput_devices_request,
-    (dump_func)dump_get_rawinput_devices_request,
     (dump_func)dump_create_job_request,
     (dump_func)dump_open_job_request,
     (dump_func)dump_assign_job_request,
@@ -4819,6 +4850,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_recv_socket_reply,
     (dump_func)dump_send_socket_reply,
+    NULL,
+    (dump_func)dump_socket_get_icmp_id_reply,
     (dump_func)dump_get_next_console_request_reply,
     NULL,
     (dump_func)dump_read_change_reply,
@@ -4854,6 +4887,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     NULL,
+    NULL,
     (dump_func)dump_create_timer_reply,
     (dump_func)dump_open_timer_reply,
     (dump_func)dump_set_timer_reply,
@@ -4882,6 +4916,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_is_window_hung_reply,
     (dump_func)dump_get_serial_info_reply,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -5026,7 +5061,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_cursor_history_reply,
     (dump_func)dump_get_rawinput_buffer_reply,
     NULL,
-    (dump_func)dump_get_rawinput_devices_reply,
     (dump_func)dump_create_job_reply,
     (dump_func)dump_open_job_reply,
     NULL,
@@ -5097,6 +5131,8 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "unlock_file",
     "recv_socket",
     "send_socket",
+    "socket_send_icmp_id",
+    "socket_get_icmp_id",
     "get_next_console_request",
     "read_directory_changes",
     "read_change",
@@ -5132,6 +5168,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "unload_registry",
     "save_registry",
     "set_registry_notification",
+    "rename_key",
     "create_timer",
     "open_timer",
     "set_timer",
@@ -5161,6 +5198,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "is_window_hung",
     "get_serial_info",
     "set_serial_info",
+    "cancel_sync",
     "register_async",
     "cancel_async",
     "get_async_result",
@@ -5304,7 +5342,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_cursor_history",
     "get_rawinput_buffer",
     "update_rawinput_devices",
-    "get_rawinput_devices",
     "create_job",
     "open_job",
     "assign_job",

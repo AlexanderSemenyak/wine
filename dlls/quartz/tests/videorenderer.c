@@ -20,6 +20,7 @@
 
 #define COBJMACROS
 #include "dshow.h"
+#include "videoacc.h"
 #include "wine/strmbase.h"
 #include "wine/test.h"
 
@@ -89,6 +90,7 @@ static void test_interfaces(void)
     check_interface(filter, &IID_IVideoWindow, TRUE);
 
     check_interface(filter, &IID_IAMFilterMiscFlags, FALSE);
+    check_interface(filter, &IID_IAMVideoAccelerator, FALSE);
     check_interface(filter, &IID_IBasicAudio, FALSE);
     check_interface(filter, &IID_IDispatch, FALSE);
     check_interface(filter, &IID_IOverlay, FALSE);
@@ -105,6 +107,7 @@ static void test_interfaces(void)
     todo_wine check_interface(pin, &IID_IQualityControl, TRUE);
     check_interface(pin, &IID_IUnknown, TRUE);
 
+    check_interface(pin, &IID_IAMVideoAccelerator, FALSE);
     check_interface(pin, &IID_IAsyncReader, FALSE);
     check_interface(pin, &IID_IMediaPosition, FALSE);
     check_interface(pin, &IID_IMediaSeeking, FALSE);
@@ -347,7 +350,7 @@ static void test_pin_info(void)
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
     ok(info.dir == PINDIR_INPUT, "Got direction %d.\n", info.dir);
-    todo_wine ok(!wcscmp(info.achName, L"Input"), "Got name %s.\n", debugstr_w(info.achName));
+    ok(!wcscmp(info.achName, L"Input"), "Got name %s.\n", debugstr_w(info.achName));
     ref = get_refcount(filter);
     ok(ref == 3, "Got unexpected refcount %ld.\n", ref);
     ref = get_refcount(pin);
@@ -1720,6 +1723,7 @@ static void test_video_window_style(IVideoWindow *window, HWND hwnd, HWND our_hw
     style = GetWindowLongA(hwnd, GWL_STYLE);
     ok(style == (WS_CLIPSIBLINGS | WS_OVERLAPPEDWINDOW), "Got style %#lx.\n", style);
 
+    flaky_wine
     ok(GetActiveWindow() == our_hwnd, "Got active window %p.\n", GetActiveWindow());
 
     hr = IVideoWindow_get_WindowStyleEx(window, &style);
@@ -2325,6 +2329,7 @@ static void test_video_window(void)
     WNDCLASSA window_class = {0};
     struct testfilter source;
     LONG width, height, l;
+    ULONG_PTR background;
     IVideoWindow *window;
     IBaseFilter *filter;
     HWND hwnd, our_hwnd;
@@ -2346,6 +2351,7 @@ static void test_video_window(void)
     filter = create_video_renderer();
     flush_events();
 
+    flaky_wine
     ok(GetActiveWindow() == our_hwnd, "Got active window %p.\n", GetActiveWindow());
 
     IBaseFilter_FindPin(filter, L"In", &pin);
@@ -2360,6 +2366,9 @@ static void test_video_window(void)
 
     tid = GetWindowThreadProcessId(hwnd, NULL);
     ok(tid == GetCurrentThreadId(), "Expected tid %#lx, got %#lx.\n", GetCurrentThreadId(), tid);
+
+    background = GetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND);
+    ok(!background, "Expected NULL brush, got %#Ix\n", background);
 
     hr = IBaseFilter_QueryInterface(filter, &IID_IVideoWindow, (void **)&window);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
@@ -2382,6 +2391,7 @@ static void test_video_window(void)
     hr = IFilterGraph2_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &req_mt);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
+    flaky_wine
     ok(GetActiveWindow() == our_hwnd, "Got active window %p.\n", GetActiveWindow());
 
     test_video_window_caption(window, hwnd);

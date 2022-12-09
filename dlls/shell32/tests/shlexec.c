@@ -40,7 +40,6 @@
 #include "shlwapi.h"
 #include "ddeml.h"
 
-#include "wine/heap.h"
 #include "wine/test.h"
 
 #include "shell32_test.h"
@@ -55,6 +54,7 @@ static DLLVERSIONINFO dllver;
 static BOOL skip_shlexec_tests = FALSE;
 static BOOL skip_noassoc_tests = FALSE;
 static HANDLE dde_ready_event;
+static BOOL is_elevated;
 
 
 /***
@@ -194,6 +194,7 @@ static void init_event(const char* child_file)
     hEvent=CreateEventA(NULL, FALSE, FALSE, event_name);
 }
 
+static HANDLE hChildFile;
 /*
  * This is just to make sure the child won't run forever stuck in a
  * GetMessage() loop when DDE fails for some reason.
@@ -201,6 +202,7 @@ static void init_event(const char* child_file)
 static void CALLBACK childTimeout(HWND wnd, UINT msg, UINT_PTR timer, DWORD time)
 {
     trace("childTimeout called\n");
+    childPrintf(hChildFile, "Timeout=1\r\n");
 
     PostQuitMessage(0);
 }
@@ -217,6 +219,7 @@ static void doChild(int argc, char** argv)
     if (hFile == INVALID_HANDLE_VALUE)
         return;
 
+    hChildFile = hFile;
     /* Arguments */
     childPrintf(hFile, "[Child]\r\n");
     if (winetest_debug > 2)
@@ -654,10 +657,20 @@ static INT_PTR shell_execute_ex_(const char* file, int line,
         c = GetPrivateProfileIntA("Child", "Failures", -1, child_file);
         if (c > 0)
             winetest_add_failures(c);
+        c = GetPrivateProfileIntA("Child", "Timeout", -1, child_file);
+        if (c > 0)
+        {
+            /* Inform caller of the timeout... these two following bits
+             * are directly returned by some Windows10 versions.
+             * Return the same bits when we detect a timeout in child.
+             */
+            SetLastError(ERROR_FILE_NOT_FOUND);
+            rc = SE_ERR_DDEFAIL;
+        }
         /* When NOZONECHECKS is specified the environment variables are not
          * inherited if the process does not have elevated privileges.
          */
-        if ((mask & SEE_MASK_NOZONECHECKS) && skip_shlexec_tests)
+        else if ((mask & SEE_MASK_NOZONECHECKS) && skip_shlexec_tests)
         {
             okChildInt_(file, line, "ShlexecVarLE", 203);
             okChildString_(file, line, "ShlexecVar", "", "");
@@ -709,23 +722,31 @@ static BOOL create_test_class(const char* class, BOOL protocol)
     return TRUE;
 }
 
-static BOOL create_test_association(const char* extension)
+static BOOL create_test_association_key(const char* extension, const char *class)
 {
     HKEY hkey;
-    char class[MAX_PATH];
     LONG rc;
 
-    sprintf(class, "shlexec%s", extension);
-    rc=RegCreateKeyExA(HKEY_CLASSES_ROOT, extension, 0, NULL, 0, KEY_SET_VALUE,
-                       NULL, &hkey, NULL);
+    rc = RegCreateKeyExA(HKEY_CLASSES_ROOT, extension, 0, NULL, 0, KEY_SET_VALUE,
+                         NULL, &hkey, NULL);
     ok(rc == ERROR_SUCCESS || rc == ERROR_ACCESS_DENIED,
        "could not create association %s (rc=%ld)\n", class, rc);
     if (rc != ERROR_SUCCESS)
         return FALSE;
 
-    rc=RegSetValueExA(hkey, NULL, 0, REG_SZ, (LPBYTE) class, strlen(class)+1);
-    ok(rc==ERROR_SUCCESS, "RegSetValueEx '%s' failed, expected ERROR_SUCCESS, got %ld\n", class, rc);
+    rc = RegSetValueExA(hkey, NULL, 0, REG_SZ, (LPBYTE) class, strlen(class)+1);
+    ok(rc == ERROR_SUCCESS, "RegSetValueEx '%s' failed, expected ERROR_SUCCESS, got %ld\n", class, rc);
     CloseHandle(hkey);
+    return TRUE;
+}
+
+static BOOL create_test_association(const char* extension)
+{
+    char class[MAX_PATH];
+
+    sprintf(class, "shlexec%s", extension);
+    if (!create_test_association_key(extension, class))
+        return FALSE;
 
     return create_test_class(class, FALSE);
 }
@@ -756,7 +777,7 @@ static LSTATUS myRegDeleteTreeA(HKEY hKey, LPCSTR lpszSubKey)
     if (dwMaxLen > ARRAY_SIZE(szNameBuf))
     {
         /* Name too big: alloc a buffer for it */
-        if (!(lpszName = heap_alloc(dwMaxLen*sizeof(CHAR))))
+        if (!(lpszName = malloc(dwMaxLen*sizeof(CHAR))))
         {
             ret = ERROR_NOT_ENOUGH_MEMORY;
             goto cleanup;
@@ -791,7 +812,7 @@ static LSTATUS myRegDeleteTreeA(HKEY hKey, LPCSTR lpszSubKey)
 cleanup:
     /* Free buffer if allocated */
     if (lpszName != szNameBuf)
-        heap_free(lpszName);
+        free(lpszName);
     if(lpszSubKey)
         RegCloseKey(hSubKey);
     return ret;
@@ -851,11 +872,11 @@ static void create_test_verb_dde(const char* classname, const char* verb,
     }
     else
     {
-        cmd = heap_alloc(strlen(argv0) + 10 + strlen(child_file) + 2 + strlen(cmdtail) + 1);
+        cmd = malloc(strlen(argv0) + 10 + strlen(child_file) + 2 + strlen(cmdtail) + 1);
         sprintf(cmd,"%s shlexec \"%s\" %s", argv0, child_file, cmdtail);
         rc=RegSetValueExA(hkey_cmd, NULL, 0, REG_SZ, (LPBYTE)cmd, strlen(cmd)+1);
         ok(rc == ERROR_SUCCESS, "setting command failed with %ld\n", rc);
-        heap_free(cmd);
+        free(cmd);
     }
 
     if (ddeexec)
@@ -1419,11 +1440,11 @@ typedef struct
 
 static const argify_tests_t argify_tests[] =
 {
-    /* Start with three simple parameters. Notice that one can reorder and
-     * duplicate the parameters. Also notice how %* take the raw input
-     * parameters string, including the trailing spaces, no matter what
-     * arguments have already been used.
-     */
+    {"ParamsS", "p2 p3 \"p4 ", FALSE, " p2 p3 \"p4 "},
+
+    /* Notice that one can reorder and duplicate the parameters.
+     * Also notice how %* take the raw input parameters string, including
+     * the trailing spaces, no matter what arguments have already been used. */
     {"Params232S", "p2 p3 p4 ", TRUE,
      " p2 p3 \"p2\" \"p2 p3 p4 \""},
 
@@ -1568,6 +1589,7 @@ static void test_argify(void)
         return;
     }
 
+    create_test_verb("shlexec.shlexec", "ParamsS", 0, "ParamsS %*");
     create_test_verb("shlexec.shlexec", "Params232S", 0, "Params232S %2 %3 \"%2\" \"%*\"");
     create_test_verb("shlexec.shlexec", "Params23456", 0, "Params23456 \"%2\" \"%3\" \"%4\" \"%5\" \"%6\"");
     create_test_verb("shlexec.shlexec", "Params23456789", 0, "Params23456789 \"%2\" \"%3\" \"%4\" \"%5\" \"%6\" \"%7\" \"%8\" \"%9\"");
@@ -1595,7 +1617,7 @@ static void test_argify(void)
         if (!cmd) cmd = "(null)";
         todo_wine_if(test->todo)
             okShell(!strcmp(cmd, test->cmd) || broken(!strcmp(cmd, bad)),
-                    "expected '%s', got '%s'\n", cmd, test->cmd);
+                    "expected '%s', got '%s'\n", test->cmd, cmd);
         test++;
     }
 }
@@ -2216,6 +2238,52 @@ static void test_exes(void)
     okChildInt("argcA", 4);
     okChildString("argvA3", "Exec");
 
+    rc=shell_execute_ex(SEE_MASK_NOZONECHECKS | SEE_MASK_CLASSNAME | SEE_MASK_FLAG_NO_UI, NULL, argv0, params,
+                        NULL, ".exe");
+    okShell(rc > 32, "returned %Iu\n", rc);
+    okChildInt("argcA", 4);
+    okChildString("argvA3", "Exec");
+
+    if (create_test_association_key(".qqqq", "exefile"))
+    {
+        rc = shell_execute_ex(SEE_MASK_NOZONECHECKS | SEE_MASK_CLASSNAME | SEE_MASK_FLAG_NO_UI, NULL, argv0, params,
+                            NULL, ".qqqq");
+        okShell(rc > 32, "returned %Iu\n", rc);
+        okChildInt("argcA", 4);
+        okChildString("argvA3", "Exec");
+        delete_test_association(".qqqq");
+    }
+    else
+    {
+        skip("Could not create associtation.\n");
+    }
+
+    if (create_test_association_key("qqqq", "exefile"))
+    {
+        rc = shell_execute_ex(SEE_MASK_NOZONECHECKS | SEE_MASK_CLASSNAME | SEE_MASK_FLAG_NO_UI, NULL, argv0, params,
+                            NULL, "qqqq");
+        okShell(rc < 32, "returned %Iu\n", rc);
+        todo_wine okShell(rc == SE_ERR_NOASSOC, "returned %Iu\n", rc);
+        delete_test_association("qqqq");
+    }
+    else
+    {
+        skip("Could not create associtation.\n");
+    }
+
+    if (is_elevated)
+    {
+        rc = shell_execute_ex(SEE_MASK_NOZONECHECKS | SEE_MASK_CLASSNAME | SEE_MASK_FLAG_NO_UI, "runas", argv0, params,
+                            NULL, ".exe");
+        okShell(rc > 32, "returned %Iu\n", rc);
+        okChildInt("argcA", 4);
+        okChildString("argvA3", "Exec");
+    }
+    else
+    {
+        skip("No admin privileges, skipping runas test.\n");
+    }
+
     if (! skip_noassoc_tests)
     {
         sprintf(filename, "%s\\test file.noassoc", tmpdir);
@@ -2252,10 +2320,10 @@ static void test_exes(void)
         /* FIXME SEE_MASK_FLAG_NO_UI is only needed due to Wine's bug */
         rc = shell_execute_ex(SEE_MASK_CLASSNAME | SEE_MASK_FLAG_NO_UI,
                               NULL, argv0, NULL, NULL, ".shlexec");
-        todo_wine okShell(rc > 32, "returned %Iu\n", rc);
+        okShell(rc > 32, "returned %Iu\n", rc);
         okChildInt("argcA", 5);
-        todo_wine okChildString("argvA3", "Open");
-        todo_wine okChildPath("argvA4", argv0);
+        okChildString("argvA3", "Open");
+        okChildPath("argvA4", argv0);
     }
 }
 
@@ -2657,6 +2725,9 @@ static void init_test(void)
     lnk_desc_t desc;
     DWORD rc;
     HRESULT r;
+    TOKEN_ELEVATION elevation;
+    HANDLE token;
+    BOOL ret;
 
     hdll=GetModuleHandleA("shell32.dll");
     pDllGetVersion=(void*)GetProcAddress(hdll, "DllGetVersion");
@@ -2781,6 +2852,13 @@ static void init_test(void)
 
     /* Set an environment variable to see if it is inherited */
     SetEnvironmentVariableA("ShlexecVar", "Present");
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+    ok(ret, "OpenProcessToken failed.\n");
+    ret = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &rc);
+    ok(ret, "GetTokenInformation failed.\n");
+    is_elevated = elevation.TokenIsElevated;
+    CloseHandle(token);
 }
 
 static void cleanup_test(void)

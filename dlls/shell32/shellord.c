@@ -84,24 +84,6 @@ extern INT    WINAPI FindMRUData(HANDLE hList, LPCVOID lpData, DWORD cbData, LPI
 extern INT    WINAPI EnumMRUListA(HANDLE hList, INT nItemPos, LPVOID lpBuffer, DWORD nBufferSize);
 
 
-/* Get a function pointer from a DLL handle */
-#define GET_FUNC(func, module, name, fail) \
-  do { \
-    if (!func) { \
-      if (!SHELL32_h##module && !(SHELL32_h##module = LoadLibraryA(#module ".dll"))) return fail; \
-      func = (void*)GetProcAddress(SHELL32_h##module, name); \
-      if (!func) return fail; \
-    } \
-  } while (0)
-
-/* Function pointers for GET_FUNC macro */
-static HMODULE SHELL32_hshlwapi=NULL;
-static HANDLE (WINAPI *pSHAllocShared)(LPCVOID,DWORD,DWORD);
-static LPVOID (WINAPI *pSHLockShared)(HANDLE,DWORD);
-static BOOL   (WINAPI *pSHUnlockShared)(LPVOID);
-static BOOL   (WINAPI *pSHFreeShared)(HANDLE,DWORD);
-
-
 /*************************************************************************
  * ParseFieldA					[internal]
  *
@@ -188,23 +170,12 @@ static BOOL GetFileNameFromBrowseA(
 	LPCSTR lpstrFilter,
 	LPCSTR lpstrTitle)
 {
-    HMODULE hmodule;
-    BOOL (WINAPI *pGetOpenFileNameA)(LPOPENFILENAMEA);
     OPENFILENAMEA ofn;
     BOOL ret;
 
     TRACE("%p, %s, %ld, %s, %s, %s, %s)\n",
 	  hwndOwner, lpstrFile, nMaxFile, lpstrInitialDir, lpstrDefExt,
 	  lpstrFilter, lpstrTitle);
-
-    hmodule = LoadLibraryA("comdlg32.dll");
-    if(!hmodule) return FALSE;
-    pGetOpenFileNameA = (void *)GetProcAddress(hmodule, "GetOpenFileNameA");
-    if(!pGetOpenFileNameA)
-    {
-	FreeLibrary(hmodule);
-	return FALSE;
-    }
 
     memset(&ofn, 0, sizeof(ofn));
 
@@ -217,9 +188,8 @@ static BOOL GetFileNameFromBrowseA(
     ofn.lpstrTitle = lpstrTitle;
     ofn.lpstrDefExt = lpstrDefExt;
     ofn.Flags = OFN_EXPLORER | OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
-    ret = pGetOpenFileNameA(&ofn);
+    ret = GetOpenFileNameA(&ofn);
 
-    FreeLibrary(hmodule);
     return ret;
 }
 
@@ -235,23 +205,12 @@ static BOOL GetFileNameFromBrowseW(
 	LPCWSTR lpstrFilter,
 	LPCWSTR lpstrTitle)
 {
-    HMODULE hmodule;
-    BOOL (WINAPI *pGetOpenFileNameW)(LPOPENFILENAMEW);
     OPENFILENAMEW ofn;
     BOOL ret;
 
     TRACE("%p, %s, %ld, %s, %s, %s, %s)\n",
 	  hwndOwner, debugstr_w(lpstrFile), nMaxFile, debugstr_w(lpstrInitialDir), debugstr_w(lpstrDefExt),
 	  debugstr_w(lpstrFilter), debugstr_w(lpstrTitle));
-
-    hmodule = LoadLibraryA("comdlg32.dll");
-    if(!hmodule) return FALSE;
-    pGetOpenFileNameW = (void *)GetProcAddress(hmodule, "GetOpenFileNameW");
-    if(!pGetOpenFileNameW)
-    {
-	FreeLibrary(hmodule);
-	return FALSE;
-    }
 
     memset(&ofn, 0, sizeof(ofn));
 
@@ -264,9 +223,8 @@ static BOOL GetFileNameFromBrowseW(
     ofn.lpstrTitle = lpstrTitle;
     ofn.lpstrDefExt = lpstrDefExt;
     ofn.Flags = OFN_EXPLORER | OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
-    ret = pGetOpenFileNameW(&ofn);
+    ret = GetOpenFileNameW(&ofn);
 
-    FreeLibrary(hmodule);
     return ret;
 }
 
@@ -1348,50 +1306,6 @@ BOOL WINAPI IsUserAnAdmin(VOID)
 }
 
 /*************************************************************************
- * SHAllocShared				[SHELL32.520]
- *
- * See shlwapi.SHAllocShared
- */
-HANDLE WINAPI SHAllocShared(const void *lpvData, DWORD dwSize, DWORD dwProcId)
-{
-    GET_FUNC(pSHAllocShared, shlwapi, (char*)7, NULL);
-    return pSHAllocShared(lpvData, dwSize, dwProcId);
-}
-
-/*************************************************************************
- * SHLockShared					[SHELL32.521]
- *
- * See shlwapi.SHLockShared
- */
-LPVOID WINAPI SHLockShared(HANDLE hShared, DWORD dwProcId)
-{
-    GET_FUNC(pSHLockShared, shlwapi, (char*)8, NULL);
-    return pSHLockShared(hShared, dwProcId);
-}
-
-/*************************************************************************
- * SHUnlockShared				[SHELL32.522]
- *
- * See shlwapi.SHUnlockShared
- */
-BOOL WINAPI SHUnlockShared(LPVOID lpView)
-{
-    GET_FUNC(pSHUnlockShared, shlwapi, (char*)9, FALSE);
-    return pSHUnlockShared(lpView);
-}
-
-/*************************************************************************
- * SHFreeShared					[SHELL32.523]
- *
- * See shlwapi.SHFreeShared
- */
-BOOL WINAPI SHFreeShared(HANDLE hShared, DWORD dwProcId)
-{
-    GET_FUNC(pSHFreeShared, shlwapi, (char*)10, FALSE);
-    return pSHFreeShared(hShared, dwProcId);
-}
-
-/*************************************************************************
  * SetAppStartingCursor				[SHELL32.99]
  */
 HRESULT WINAPI SetAppStartingCursor(HWND u, DWORD v)
@@ -1674,7 +1588,7 @@ UINT WINAPI SHAddFromPropSheetExtArray(HPSXA hpsxa, LPFNADDPROPSHEETPAGE lpfnAdd
         /* Call the AddPage method of all registered IShellPropSheetExt interfaces */
         for (i = 0; i != psxa->uiCount; i++)
         {
-            psxa->pspsx[i]->lpVtbl->AddPages(psxa->pspsx[i], PsxaCall, (LPARAM)&Call);
+            IShellPropSheetExt_AddPages(psxa->pspsx[i], PsxaCall, (LPARAM)&Call);
         }
 
         return Call.uiCount;
@@ -1764,21 +1678,21 @@ HPSXA WINAPI SHCreatePropSheetExtArrayEx(HKEY hKey, LPCWSTR pszSubKey, UINT max_
                        Then call IShellExtInit's Initialize method. */
                     if (SUCCEEDED(CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER/* | CLSCTX_NO_CODE_DOWNLOAD */, &IID_IShellPropSheetExt, (LPVOID *)&pspsx)))
                     {
-                        if (SUCCEEDED(pspsx->lpVtbl->QueryInterface(pspsx, &IID_IShellExtInit, (PVOID *)&psxi)))
+                        if (SUCCEEDED(IShellPropSheetExt_QueryInterface(pspsx, &IID_IShellExtInit, (PVOID *)&psxi)))
                         {
-                            if (SUCCEEDED(psxi->lpVtbl->Initialize(psxi, NULL, pDataObj, hKey)))
+                            if (SUCCEEDED(IShellExtInit_Initialize(psxi, NULL, pDataObj, hKey)))
                             {
                                 /* Add the IShellPropSheetExt instance to the array */
                                 psxa->pspsx[psxa->uiCount++] = pspsx;
                             }
                             else
                             {
-                                psxi->lpVtbl->Release(psxi);
-                                pspsx->lpVtbl->Release(pspsx);
+                                IShellExtInit_Release(psxi);
+                                IShellPropSheetExt_Release(pspsx);
                             }
                         }
                         else
-                            pspsx->lpVtbl->Release(pspsx);
+                            IShellPropSheetExt_Release(pspsx);
                     }
                 }
 
@@ -1821,7 +1735,7 @@ UINT WINAPI SHReplaceFromPropSheetExtArray(HPSXA hpsxa, UINT uPageID, LPFNADDPRO
         for (i = 0; i != psxa->uiCount; i++)
         {
             Call.bCalled = FALSE;
-            psxa->pspsx[i]->lpVtbl->ReplacePage(psxa->pspsx[i], uPageID, PsxaCall, (LPARAM)&Call);
+            IShellPropSheetExt_ReplacePage(psxa->pspsx[i], uPageID, PsxaCall, (LPARAM)&Call);
         }
 
         return Call.uiCount;
@@ -1844,7 +1758,7 @@ void WINAPI SHDestroyPropSheetExtArray(HPSXA hpsxa)
     {
         for (i = 0; i != psxa->uiCount; i++)
         {
-            psxa->pspsx[i]->lpVtbl->Release(psxa->pspsx[i]);
+            IShellPropSheetExt_Release(psxa->pspsx[i]);
         }
 
         LocalFree(psxa);

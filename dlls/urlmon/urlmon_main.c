@@ -75,7 +75,7 @@ tls_data_t *get_tls_data(void)
 
     data = TlsGetValue(urlmon_tls);
     if(!data) {
-        data = heap_alloc_zero(sizeof(tls_data_t));
+        data = calloc(1, sizeof(tls_data_t));
         if(!data)
             return NULL;
 
@@ -99,7 +99,7 @@ static void free_tls_list(void)
     while(!list_empty(&tls_list)) {
         data = LIST_ENTRY(list_head(&tls_list), tls_data_t, entry);
         list_remove(&data->entry);
-        heap_free(data);
+        free(data);
     }
 
     TlsFree(urlmon_tls);
@@ -125,7 +125,7 @@ static void detach_thread(void)
         DestroyWindow(data->notif_hwnd);
     }
 
-    heap_free(data);
+    free(data);
 }
 
 static void process_detach(void)
@@ -788,16 +788,6 @@ void WINAPI LogSqmUXCommandOffsetInternal(DWORD unk1, DWORD unk2, DWORD unk3, DW
 int WINAPI MapUriToBrowserEmulationState(DWORD unk1, DWORD unk2, DWORD unk3)
 {
     FIXME("stub: %ld %ld %ld\n", unk1, unk2, unk3);
-    return 0;
-}
-
-/***********************************************************************
- *           MapBrowserEmulationModeToUserAgent (URLMON.445)
- *    Undocumented, added in IE8
- */
-int WINAPI MapBrowserEmulationModeToUserAgent(DWORD unk1, DWORD unk2)
-{
-    FIXME("stub: %ld %ld\n", unk1, unk2);
     return 0;
 }
 
