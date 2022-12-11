@@ -1132,9 +1132,9 @@ static void parse_in_file( struct file *source, FILE *file )
     {
         if (strncmp( buffer, ".TH", 3 )) continue;
         p = skip_spaces( buffer + 3 );
-        while (*p && *p != ' ' && *p != '\t') p++;  /* program name */
-        p = skip_spaces( p );
-        if (*p) source->args = xstrdup( p );  /* man section */
+        if (!(p = strtok( p, " \t" ))) continue;  /* program name */
+        if (!(p = strtok( NULL, " \t" ))) continue;  /* man section */
+        source->args = xstrdup( p );
         return;
     }
 }
@@ -3173,12 +3173,6 @@ static void output_source_one_arch( struct makefile *make, struct incl_file *sou
     {
         if (make->module && is_crt_module( make->module )) output_filename( "-fno-builtin" );
     }
-
-    /* force -Wformat when using 'long' types, until all modules have been converted
-     * and we can remove -Wno-format */
-    if (!make->extlib && strarray_exists( &extra_cflags[arch], "-Wno-format" ) &&
-        !strarray_exists( &defines, "-DWINE_NO_LONG_TYPES" ))
-        output_filename( "-Wformat" );
 
     output_filenames( cpp_flags );
     output_filename( arch_make_variable( "CFLAGS", arch ));
